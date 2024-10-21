@@ -204,6 +204,11 @@ func runLogin(cmd *cobra.Command, argv []string) (err error) {
 		"ID":   clusterID,
 		"Name": clusterName}).Infoln("Target cluster")
 
+	// Call PrintClusterInfo
+	login.PrintClusterInfo(clusterID)
+	// PrintAccessProtectionStatus
+	login.PrintAccessProtectionStatus(clusterID)
+
 	if globalOpts.Manager {
 		logger.WithField("Cluster ID", clusterID).Debugln("Finding managing cluster")
 		var isHostedControlPlane bool

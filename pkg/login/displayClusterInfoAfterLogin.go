@@ -3,11 +3,6 @@ package login
 import (
 	"fmt"
 
-	logger "github.com/sirupsen/logrus"
-	"k8s.io/client-go/rest"
-
-	ocmsdk "github.com/openshift-online/ocm-sdk-go"
-	"github.com/openshift/backplane-cli/pkg/cli/config"
 	"github.com/openshift/backplane-cli/pkg/ocm"
 )
 
@@ -51,12 +46,4 @@ func displayClusterInfo(clusterID string) error {
 	return nil
 }
 
-// to call the current function
-func calldisplayClusterInfo(clusterID string) error {
-	if err := displayClusterInfo(clusterID); err != nil {
-		return err
-	}
-	return nil
 }
-
-//////////////////////////////////////////////////////////////////
