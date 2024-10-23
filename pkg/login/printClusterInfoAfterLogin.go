@@ -1,8 +1,11 @@
 package login
 
 import (
+	"context"
 	"fmt"
 
+	//	"github.com/openshift-online/ocm-sdk-go"
+	accountsmgmtv1 "github.com/openshift-online/ocm-sdk-go/accountsmgmt/v1" // Import the package
 	"github.com/openshift/backplane-cli/pkg/ocm"
 	logger "github.com/sirupsen/logrus"
 )
@@ -27,6 +30,7 @@ func PrintClusterInfo(clusterID string) error {
 
 	logger.Info("Basic cluster information displayed.")
 	return nil
+
 }
 
 // PrintAccessProtectionStatus retrieves and displays the access protection status of the target cluster.
@@ -41,4 +45,24 @@ func PrintAccessProtectionStatus(clusterID string) {
 	} else {
 		fmt.Println("Access protection: Disabled")
 	}
+}
+
+//Print Customer information
+
+func PrintOrgName(id string) (*accountsmgmtv1.Organization, error) {
+	// Set up the OCM connection
+	ocmConnection, _ := ocm.DefaultOCMInterface.SetupOCMConnection()
+
+	defer ocmConnection.Close()
+
+	// Fetch the organization details
+	orgClient := ocmConnection.AccountsMgmt().V1().Organizations()
+	orgResponse, err := orgClient.Organization(id).Get().SendContext(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get organization: %v", err)
+	}
+
+	fmt.Printf("Organization ID: %s\n", orgResponse.Body().ID())
+	fmt.Printf("Organization Name: %s\n", orgResponse.Body().Name())
+	return orgResponse.Body(), nil
 }

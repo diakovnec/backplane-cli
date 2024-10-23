@@ -208,6 +208,8 @@ func runLogin(cmd *cobra.Command, argv []string) (err error) {
 	login.PrintClusterInfo(clusterID)
 	// PrintAccessProtectionStatus
 	login.PrintAccessProtectionStatus(clusterID)
+	// PrintCustomerInfo
+	login.PrintOrgName(clusterID)
 
 	if globalOpts.Manager {
 		logger.WithField("Cluster ID", clusterID).Debugln("Finding managing cluster")
