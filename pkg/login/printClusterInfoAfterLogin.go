@@ -27,8 +27,8 @@ func PrintClusterInfo(clusterID string) error {
 	fmt.Printf("Cluster Provider: %s\n", clusterInfo.CloudProvider().ID())
 	PrintOpenshiftVersion(clusterID)
 	PrintAccessProtectionStatus(clusterID)
-	fmt.Printf("Organization ID: %s\n", clusterInfo.AWS().STS().OidcConfig().OrganizationId())
-	fmt.Printf("Subscription ID: %s\n\n", clusterInfo.Subscription().ID())
+	// fmt.Printf("Organization ID: %s\n", clusterInfo.AWS().STS().OidcConfig().OrganizationId())
+	// fmt.Printf("Subscription ID: %s\n\n", clusterInfo.Subscription().ID())
 
 	// Display access protection status
 	logger.Info("Basic cluster information displayed.")
