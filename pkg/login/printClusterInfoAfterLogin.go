@@ -24,9 +24,10 @@ func PrintClusterInfo(clusterID string) error {
 	fmt.Printf("%-25s %s\n", "Cluster Status:", clusterInfo.Status().State())
 	fmt.Printf("%-25s %s\n", "Cluster Region:", clusterInfo.Region().ID())
 	fmt.Printf("%-25s %s\n", "Cluster Provider:", clusterInfo.CloudProvider().ID())
+	fmt.Printf("%-25s %t\n", "Hypershift Enabled:", clusterInfo.Hypershift().Enabled())
+
 	PrintOpenshiftVersion(clusterID)
 	PrintAccessProtectionStatus(clusterID)
-	CheckIfHyperShiftIsEnabled(clusterID)
 	// Display access protection status
 	logger.Info("Basic cluster information displayed.")
 	return nil
@@ -56,24 +57,4 @@ func PrintOpenshiftVersion(clusterID string) {
 	}
 	openshiftVersion, _ := clusterInfo.GetOpenshiftVersion()
 	fmt.Printf("%-25s %s\n", "Openshift Version: ", openshiftVersion)
-}
-
-func CheckIfHyperShiftIsEnabled(clusterID string) error {
-
-	// Retrieve cluster information
-	clusterInfo, err := ocm.DefaultOCMInterface.GetClusterInfoByID(clusterID)
-	if err != nil {
-		return fmt.Errorf("error retrieving cluster info: %v", err)
-	}
-
-	ocmConnection, _ := ocm.DefaultOCMInterface.SetupOCMConnection()
-	defer ocmConnection.Close()
-
-	hypershift := "Disabled"
-
-	if clusterInfo.Hypershift() != nil && clusterInfo.Hypershift().Enabled() {
-		hypershift = "Enabled"
-	}
-	fmt.Printf("%-25s %s\n", "Hypershift: ", hypershift)
-	return nil
 }
