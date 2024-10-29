@@ -19,16 +19,18 @@ func PrintClusterInfo(clusterID string) error {
 	}
 
 	// Display cluster information
-
-	fmt.Printf("\nCluster ID: %s\n", clusterInfo.ID())
-	fmt.Printf("Cluster Name: %s\n", clusterInfo.Name())
-	fmt.Printf("Cluster Status: %s\n", clusterInfo.Status().State())
-	fmt.Printf("Cluster Region: %s\n", clusterInfo.Region().ID())
-	fmt.Printf("Cluster Provider: %s\n", clusterInfo.CloudProvider().ID())
+	fmt.Printf("\n%-25s %s\n", "Cluster ID:", clusterInfo.ID())
+	fmt.Printf("%-25s %s\n", "Cluster Name:", clusterInfo.Name())
+	fmt.Printf("%-25s %s\n", "Cluster Status:", clusterInfo.Status().State())
+	fmt.Printf("%-25s %s\n", "Cluster Region:", clusterInfo.Region().ID())
+	fmt.Printf("%-25s %s\n", "Cluster Provider:", clusterInfo.CloudProvider().ID())
+	// fmt.Printf("\nCluster ID: %s\n", clusterInfo.ID())
+	// fmt.Printf("Cluster Name: %s\n", clusterInfo.Name())
+	// fmt.Printf("Cluster Status: %s\n", clusterInfo.Status().State())
+	// fmt.Printf("Cluster Region: %s\n", clusterInfo.Region().ID())
+	// fmt.Printf("Cluster Provider: %s\n", clusterInfo.CloudProvider().ID())
 	PrintOpenshiftVersion(clusterID)
 	PrintAccessProtectionStatus(clusterID)
-	// fmt.Printf("Organization ID: %s\n", clusterInfo.AWS().STS().OidcConfig().OrganizationId())
-	// fmt.Printf("Subscription ID: %s\n\n", clusterInfo.Subscription().ID())
 
 	// Display access protection status
 	logger.Info("Basic cluster information displayed.")
@@ -44,9 +46,9 @@ func PrintAccessProtectionStatus(clusterID string) {
 	defer ocmConnection.Close()
 	enabled, _ := ocm.DefaultOCMInterface.IsClusterAccessProtectionEnabled(ocmConnection, clusterID)
 	if enabled {
-		fmt.Println("Access protection: Enabled")
+		fmt.Printf("%-25s %s\n", "Access protection:", "Enabled")
 	} else {
-		fmt.Println("Access protection: Disabled")
+		fmt.Printf("%-25s %s\n", "Access protection:", "Disabled\n")
 	}
 
 }
@@ -58,5 +60,5 @@ func PrintOpenshiftVersion(clusterID string) {
 		return
 	}
 	openshiftVersion, _ := clusterInfo.GetOpenshiftVersion()
-	fmt.Println("Openshift Version: ", openshiftVersion)
+	fmt.Printf("%-25s %s\n", "Openshift Version: ", openshiftVersion)
 }
