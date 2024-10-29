@@ -204,16 +204,15 @@ func runLogin(cmd *cobra.Command, argv []string) (err error) {
 		"ID":   clusterID,
 		"Name": clusterName}).Infoln("Target cluster")
 
+	//PrintClusterInfo After Login
+	if err := login.PrintClusterInfo(clusterID); err != nil {
+		return fmt.Errorf("failed to print cluster info: %v", err)
+	}
+
 	if globalOpts.Manager {
 		logger.WithField("Cluster ID", clusterID).Debugln("Finding managing cluster")
 		var isHostedControlPlane bool
 		targetClusterID := clusterID
-
-		// Call PrintClusterInfo
-		// if err := login.PrintClusterInfo(clusterID); err != nil {
-		// 	return fmt.Errorf("failed to print cluster info: %v", err)
-		// }
-		login.PrintClusterInfo(clusterID)
 
 		clusterID, clusterName, isHostedControlPlane, err = ocm.DefaultOCMInterface.GetManagingCluster(clusterID)
 		if err != nil {
