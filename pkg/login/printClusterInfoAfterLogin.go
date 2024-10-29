@@ -24,14 +24,9 @@ func PrintClusterInfo(clusterID string) error {
 	fmt.Printf("%-25s %s\n", "Cluster Status:", clusterInfo.Status().State())
 	fmt.Printf("%-25s %s\n", "Cluster Region:", clusterInfo.Region().ID())
 	fmt.Printf("%-25s %s\n", "Cluster Provider:", clusterInfo.CloudProvider().ID())
-	// fmt.Printf("\nCluster ID: %s\n", clusterInfo.ID())
-	// fmt.Printf("Cluster Name: %s\n", clusterInfo.Name())
-	// fmt.Printf("Cluster Status: %s\n", clusterInfo.Status().State())
-	// fmt.Printf("Cluster Region: %s\n", clusterInfo.Region().ID())
-	// fmt.Printf("Cluster Provider: %s\n", clusterInfo.CloudProvider().ID())
 	PrintOpenshiftVersion(clusterID)
 	PrintAccessProtectionStatus(clusterID)
-
+	CheckIfHyperShiftIsEnabled(clusterID)
 	// Display access protection status
 	logger.Info("Basic cluster information displayed.")
 	return nil
@@ -46,9 +41,9 @@ func PrintAccessProtectionStatus(clusterID string) {
 	defer ocmConnection.Close()
 	enabled, _ := ocm.DefaultOCMInterface.IsClusterAccessProtectionEnabled(ocmConnection, clusterID)
 	if enabled {
-		fmt.Printf("%-25s %s\n", "Access protection:", "Enabled")
+		fmt.Printf("%-25s %s", "Access protection:", "Enabled")
 	} else {
-		fmt.Printf("%-25s %s\n", "Access protection:", "Disabled\n")
+		fmt.Printf("%-25s %s", "Access protection:", "Disabled\n")
 	}
 
 }
@@ -61,4 +56,24 @@ func PrintOpenshiftVersion(clusterID string) {
 	}
 	openshiftVersion, _ := clusterInfo.GetOpenshiftVersion()
 	fmt.Printf("%-25s %s\n", "Openshift Version: ", openshiftVersion)
+}
+
+func CheckIfHyperShiftIsEnabled(clusterID string) error {
+
+	// Retrieve cluster information
+	clusterInfo, err := ocm.DefaultOCMInterface.GetClusterInfoByID(clusterID)
+	if err != nil {
+		return fmt.Errorf("error retrieving cluster info: %v", err)
+	}
+
+	ocmConnection, _ := ocm.DefaultOCMInterface.SetupOCMConnection()
+	defer ocmConnection.Close()
+
+	hypershift := "Disabled"
+
+	if clusterInfo.Hypershift() != nil && clusterInfo.Hypershift().Enabled() {
+		hypershift = "Enabled"
+	}
+	fmt.Printf("%-25s %s\n", "Hypershift: ", hypershift)
+	return nil
 }
