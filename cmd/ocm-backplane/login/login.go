@@ -209,6 +209,11 @@ func runLogin(cmd *cobra.Command, argv []string) (err error) {
 		var isHostedControlPlane bool
 		targetClusterID := clusterID
 
+		// Call PrintClusterInfo
+		if err := login.PrintClusterInfo(clusterID); err != nil {
+			return fmt.Errorf("failed to print cluster info: %v", err)
+		}
+
 		clusterID, clusterName, isHostedControlPlane, err = ocm.DefaultOCMInterface.GetManagingCluster(clusterID)
 		if err != nil {
 			return err
