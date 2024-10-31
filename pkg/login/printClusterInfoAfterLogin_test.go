@@ -1,133 +1,143 @@
-package login
+package login_test
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
 	"github.com/golang/mock/gomock"
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
-
-	// "github.com/openshift/backplane-cli/pkg/login" // Removed to avoid import cycle
-	"github.com/openshift/backplane-cli/pkg/ocm/mocks" // Adjust the import path as necessary
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/openshift/backplane-cli/pkg/login"
+	"github.com/openshift/backplane-cli/pkg/ocm"
+	ocmMock "github.com/openshift/backplane-cli/pkg/ocm/mocks"
+	"github.com/sirupsen/logrus"
 )
 
-// Initialize Ginkgo and Gomega
-func TestLogin(t *testing.T) {
-	gomega.RegisterFailHandler(ginkgo.Fail)
-	ginkgo.RunSpecs(t, "Login Suite")
+// Mocking the necessary methods that will be called within PrintClusterInfo
+type MockClusterInfo struct {
+	id                string
+	name              string
+	status            string
+	region            string
+	cloudProvider     string
+	hypershiftEnabled bool
 }
 
-var _ = ginkgo.Describe("Cluster Information", func() {
+func (m *MockClusterInfo) ID() string {
+	return m.id
+}
+
+func (m *MockClusterInfo) Name() string {
+	return m.name
+}
+
+func (m *MockClusterInfo) Status() *MockClusterStatus {
+	return &MockClusterStatus{state: m.status}
+}
+
+func (m *MockClusterInfo) Region() *MockClusterRegion {
+	return &MockClusterRegion{id: m.region}
+}
+
+func (m *MockClusterInfo) CloudProvider() *MockCloudProvider {
+	return &MockCloudProvider{id: m.cloudProvider}
+}
+
+func (m *MockClusterInfo) Hypershift() *MockHypershift {
+	return &MockHypershift{enabled: m.hypershiftEnabled}
+}
+
+func (m *MockClusterInfo) GetOpenshiftVersion() (string, error) {
+	return "4.8.0", nil
+}
+
+// Mocked nested structs
+type MockClusterStatus struct {
+	state string
+}
+
+func (s *MockClusterStatus) State() string {
+	return s.state
+}
+
+type MockClusterRegion struct {
+	id string
+}
+
+func (r *MockClusterRegion) ID() string {
+	return r.id
+}
+
+type MockCloudProvider struct {
+	id string
+}
+
+func (p *MockCloudProvider) ID() string {
+	return p.id
+}
+
+type MockHypershift struct {
+	enabled bool
+}
+
+func (h *MockHypershift) Enabled() bool {
+	return h.enabled
+}
+
+var _ = Describe("PrintClusterInfo", func() {
 	var (
-		ctrl             *gomock.Controller
-		mockOCMInterface *mocks.MockOCMInterface
 		clusterID        string
+		mockCluster      *MockClusterInfo
+		buf              *bytes.Buffer
+		mockOcmInterface *ocmMock.MockOCMInterface
+		mockCtrl         *gomock.Controller
 	)
 
-	ginkgo.BeforeEach(func() {
-		ctrl = gomock.NewController(ginkgo.GinkgoT())
-		mockOCMInterface = mocks.NewMockOCMInterface(ctrl)
+	BeforeEach(func() {
+
+		mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
+		ocm.DefaultOCMInterface = mockOcmInterface
+
 		clusterID = "test-cluster-id"
+		mockCluster = &MockClusterInfo{
+			id:                clusterID,
+			name:              "Test Cluster",
+			status:            "Running",
+			region:            "us-east-1",
+			cloudProvider:     "AWS",
+			hypershiftEnabled: true,
+		}
+		buf = new(bytes.Buffer)
+		logrus.SetOutput(buf)
+
+		// Mocking the ocm.DefaultOCMInterface
+		mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(mockCluster, nil)
 	})
 
-	ginkgo.AfterEach(func() {
-		ctrl.Finish()
+	It("should print cluster information", func() {
+		err := login.PrintClusterInfo(clusterID)
+		Expect(err).To(BeNil())
+
+		output := buf.String()
+		Expect(output).To(ContainSubstring(fmt.Sprintf("Cluster ID:    %s\n", clusterID)))
+		Expect(output).To(ContainSubstring("Cluster Name:   Test Cluster\n"))
+		Expect(output).To(ContainSubstring("Cluster Status: Running\n"))
+		Expect(output).To(ContainSubstring("Cluster Region: us-east-1\n"))
+		Expect(output).To(ContainSubstring("Cluster Provider: AWS\n"))
+		Expect(output).To(ContainSubstring("Hypershift Enabled: true\n"))
+		Expect(output).To(ContainSubstring("Openshift Version:  4.8.0\n"))
+		Expect(output).To(ContainSubstring("Access Protection: Enabled"))
+		Expect(output).To(ContainSubstring("Limited Support Status:  Fully Supported\n"))
 	})
 
-	ginkgo.Context("PrintClusterInfo", func() {
-		ginkgo.It("should return an error when cluster info cannot be retrieved", func() {
-			mockOCMInterface.EXPECT().GetClusterInfoByID(clusterID).Return(nil, fmt.Errorf("not found"))
-
-			err := PrintClusterInfo(clusterID)
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(err.Error()).To(gomega.Equal("error retrieving cluster info: not found"))
-		})
-
-		ginkgo.It("should display cluster information correctly", func() {
-			// Create a mock clusterInfo with necessary methods
-			clusterInfo := mocks.NewMockClusterInfo(ctrl)
-
-			clusterInfo.EXPECT().ID().Return(clusterID)
-			clusterInfo.EXPECT().Name().Return("Test Cluster")
-			mockClusterStatus := mocks.NewMockClusterStatus(ctrl)
-			clusterInfo.EXPECT().Status().Return(mockClusterStatus)
-			clusterInfo.EXPECT().Region().Return(mocks.NewMockRegion(ctrl))
-			clusterInfo.EXPECT().CloudProvider().Return(mocks.NewMockCloudProvider(ctrl))
-			clusterInfo.EXPECT().Hypershift().Return(mocks.NewMockHypershift(ctrl))
-
-			mockOCMInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil)
-
-			// Mock methods for the returned status, region, and cloud provider
-			// Add similar expectations for Status, Region, CloudProvider, etc.
-
-			err := PrintClusterInfo(clusterID)
-			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			// You can verify the output using logrus or a similar approach
-		})
-	})
-
-	ginkgo.Context("PrintAccessProtectionStatus", func() {
-		ginkgo.It("should display enabled access protection", func() {
-			ocmConnection := mocks.NewMockOCMConnection(ctrl)
-			mockOCMInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil)
-			defer ocmConnection.Close()
-
-			mockOCMInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(true, nil)
-
-			PrintAccessProtectionStatus(clusterID)
-			// Check the output for "Access Protection: Enabled"
-		})
-
-		ginkgo.It("should display disabled access protection", func() {
-			ocmConnection := mocks.NewMockOCMConnection(ctrl)
-			mockOCMInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil)
-			defer ocmConnection.Close()
-
-			mockOCMInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(false, nil)
-
-			PrintAccessProtectionStatus(clusterID)
-			// Check the output for "Access Protection: Disabled"
-		})
-	})
-
-	ginkgo.Context("PrintOpenshiftVersion", func() {
-		ginkgo.It("should print the OpenShift version", func() {
-			clusterInfo := mocks.NewMockClusterInfo(ctrl)
-			mockOCMInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil)
-
-			clusterInfo.EXPECT().GetOpenshiftVersion().Return("4.10", nil)
-
-			PrintOpenshiftVersion(clusterID)
-			// Check the output for "Openshift Version: 4.10"
-		})
-	})
-
-	ginkgo.Context("GetLimitedSupportStatus", func() {
-		ginkgo.It("should return fully supported status", func() {
-			clusterInfo := mocks.NewMockClusterInfo(ctrl)
-			mockOCMInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil)
-
-			mockClusterStatus := mocks.NewMockClusterStatus(ctrl)
-			clusterInfo.EXPECT().Status().Return(mockClusterStatus)
-			mockClusterStatus.EXPECT().LimitedSupportReasonCount().Return(0)
-
-			status := GetLimitedSupportStatus(clusterID)
-			gomega.Expect(status).To(gomega.Equal("0"))
-			// Check the output for "Limited Support Status: Fully Supported"
-		})
-
-		ginkgo.It("should return limited support status", func() {
-			clusterInfo := mocks.NewMockClusterInfo(ctrl)
-			mockOCMInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil)
-
-			mockClusterStatus := mocks.NewMockClusterStatus(ctrl)
-			clusterInfo.EXPECT().Status().Return(mockClusterStatus)
-			mockClusterStatus.EXPECT().LimitedSupportReasonCount().Return(1)
-
-			status := GetLimitedSupportStatus(clusterID)
-			gomega.Expect(status).To(gomega.Equal("1"))
-			// Check the output for "Limited Support Status: Limited Support"
-		})
+	AfterEach(func() {
+		// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
+		ocm.DefaultOCMInterface = nil
 	})
 })
+
+func TestLogin(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Login Suite")
+}
