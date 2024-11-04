@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/golang/mock/gomock"
-	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/openshift/backplane-cli/pkg/ocm"
 	ocmMock "github.com/openshift/backplane-cli/pkg/ocm/mocks"
-	"github.com/sirupsen/logrus"
+
+	cmv1 "github.com/openshift-online/ocm-sdk-go/clustersmgmt/v1"
 )
 
 // Mocking the necessary methods that will be called within PrintClusterInfo
@@ -86,20 +87,24 @@ func (h *MockHypershift) Enabled() bool {
 
 var _ = Describe("PrintClusterInfo", func() {
 	var (
-		clusterID        string
-		mockCluster      *MockClusterInfo
-		buf              *bytes.Buffer
+		clusterID string
+		//mockCluster *MockClusterInfo
+		buf *bytes.Buffer
+		//mockClient       *mocks.MockClientInterface
 		mockOcmInterface *ocmMock.MockOCMInterface //added myself
 		mockCtrl         *gomock.Controller        //added myself
 	)
 
 	BeforeEach(func() {
 
+		mockCtrl = gomock.NewController(GinkgoT())
+		//mockClient = mocks.NewMockClientInterface(mockCtrl)
+
 		mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
 		ocm.DefaultOCMInterface = mockOcmInterface
 
 		clusterID = "test-cluster-id"
-		mockCluster = &MockClusterInfo{
+		/*mockCluster = &MockClusterInfo{
 			id:                clusterID,
 			name:              "Test Cluster",
 			status:            "Running",
@@ -108,10 +113,18 @@ var _ = Describe("PrintClusterInfo", func() {
 			hypershiftEnabled: true,
 		}
 		buf = new(bytes.Buffer)
-		logrus.SetOutput(buf)
+		logrus.SetOutput(buf)*/
 
-		// Mocking the ocm.DefaultOCMInterface
-		mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(mockCluster, nil)
+		clusterInfo, _ := cmv1.NewCluster().
+			ID(clusterID).
+			Name("Test Cluster").
+			CloudProvider(cmv1.NewCloudProvider().ID("aws")).
+			Product(cmv1.NewProduct().ID("dedicated")).
+			AdditionalTrustBundle("REDACTED").
+			Proxy(cmv1.NewProxy().HTTPProxy("http://my.proxy:80").HTTPSProxy("https://my.proxy:443")).
+			OpenshiftVersion("4.14.8").Build()
+
+		mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
 	})
 
 	It("should print cluster information", func() {
