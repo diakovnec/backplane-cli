@@ -1,4 +1,4 @@
-package login_test
+package login
 
 import (
 	"bytes"
@@ -89,8 +89,8 @@ var _ = Describe("PrintClusterInfo", func() {
 		clusterID        string
 		mockCluster      *MockClusterInfo
 		buf              *bytes.Buffer
-		mockOcmInterface *ocmMock.MockOCMInterface
-		mockCtrl         *gomock.Controller
+		mockOcmInterface *ocmMock.MockOCMInterface //added myself
+		mockCtrl         *gomock.Controller        //added myself
 	)
 
 	BeforeEach(func() {
