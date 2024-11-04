@@ -23,11 +23,12 @@ func PrintClusterInfo(clusterID string) error {
 	fmt.Printf("%-25s %s\n", "Cluster Name:", clusterInfo.Name())
 	fmt.Printf("%-25s %s\n", "Cluster Status:", clusterInfo.Status().State())
 	fmt.Printf("%-25s %s\n", "Cluster Region:", clusterInfo.Region().ID())
-	fmt.Printf("%-25s %s\n", "Cluster Provider:", clusterInfo.CloudProvider().ID())
-	fmt.Printf("%-25s %t\n", "Hypershift Enabled:", clusterInfo.Hypershift().Enabled())
-	PrintOpenshiftVersion(clusterID)
-	PrintAccessProtectionStatus(clusterID)
-	GetLimitedSupportStatus(clusterID)
+	//fmt.Printf("%-25s %s\n", "Cluster Provider:", clusterInfo.CloudProvider().ID())
+	//fmt.Printf("%-25s %t\n", "Hypershift Enabled:", clusterInfo.Hypershift().Enabled())
+	fmt.Printf("\n%-25s %s\n", "Version:", clusterInfo.OpenshiftVersion())
+	//PrintOpenshiftVersion(clusterID)
+	//PrintAccessProtectionStatus(clusterID)
+	//GetLimitedSupportStatus(clusterID)
 
 	logger.Info("Basic cluster information displayed.")
 	return nil
@@ -52,15 +53,15 @@ func PrintAccessProtectionStatus(clusterID string) {
 
 }
 
-func PrintOpenshiftVersion(clusterID string) {
-	clusterInfo, err := ocm.DefaultOCMInterface.GetClusterInfoByID(clusterID)
-	if err != nil {
-		fmt.Println("Error retrieving cluster info: ", err)
-		return
-	}
-	openshiftVersion, _ := clusterInfo.GetOpenshiftVersion()
-	fmt.Printf("%-25s %s\n", "Openshift Version: ", openshiftVersion)
-}
+// func PrintOpenshiftVersion(clusterID string) {
+// 	clusterInfo, err := ocm.DefaultOCMInterface.GetClusterInfoByID(clusterID)
+// 	if err != nil {
+// 		fmt.Println("Error retrieving cluster info: ", err)
+// 		return
+// 	}
+// 	openshiftVersion, _ := clusterInfo.GetOpenshiftVersion()
+// 	fmt.Printf("%-25s %s\n", "Openshift Version: ", openshiftVersion)
+// }
 
 func GetLimitedSupportStatus(clusterID string) string {
 	clusterInfo, err := ocm.DefaultOCMInterface.GetClusterInfoByID(clusterID)
