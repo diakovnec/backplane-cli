@@ -136,8 +136,8 @@ var _ = Describe("PrintClusterInfo", func() {
 		Expect(output).To(ContainSubstring("Cluster Name:             Test Cluster\n"))
 		Expect(output).To(ContainSubstring("Cluster Status:           Running\n"))
 		Expect(output).To(ContainSubstring("Cluster Region:           us-east-1\n"))
-		//Expect(output).To(ContainSubstring("Cluster Provider:         aws\n"))
-		//Expect(output).To(ContainSubstring("Hypershift Enabled:       true\n"))
+		Expect(output).To(ContainSubstring("Cluster Provider:         aws\n"))
+		Expect(output).To(ContainSubstring("Hypershift Enabled:       false\n"))
 		Expect(output).To(ContainSubstring("Version:                  4.14.8\n"))
 	})
 
