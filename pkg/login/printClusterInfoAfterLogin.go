@@ -26,8 +26,8 @@ func PrintClusterInfo(clusterID string) error {
 	fmt.Printf("%-25s %s\n", "Cluster Provider:", clusterInfo.CloudProvider().ID())
 	fmt.Printf("%-25s %t\n", "Hypershift Enabled:", clusterInfo.Hypershift().Enabled())
 	fmt.Printf("\n%-25s %s\n", "Version:", clusterInfo.OpenshiftVersion())
-	//PrintAccessProtectionStatus(clusterID)
-	GetLimitedSupportStatus(clusterID)
+	PrintAccessProtectionStatus(clusterID)
+	//GetLimitedSupportStatus(clusterID)
 
 	logger.Info("Basic cluster information displayed.")
 	return nil
