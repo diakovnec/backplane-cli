@@ -42,7 +42,10 @@ func PrintAccessProtectionStatus(clusterID string) {
 		fmt.Println("Error setting up OCM connection: ", err)
 		return
 	}
-	defer ocmConnection.Close()
+	if ocmConnection != nil {
+		defer ocmConnection.Close()
+	}
+
 	enabled, _ := ocm.DefaultOCMInterface.IsClusterAccessProtectionEnabled(ocmConnection, clusterID)
 	if enabled {
 		fmt.Printf("%-25s %s\n", "Access Protection:", "Enabled\n")
