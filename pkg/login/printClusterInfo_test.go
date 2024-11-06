@@ -26,7 +26,7 @@ var _ = Describe("PrintClusterInfo", func() {
 		oldStdout        *os.File
 		r, w             *os.File
 		ocmConnection    *ocmsdk.Connection
-		//clusterInfo      *cmv1.Cluster
+		clusterInfo      *cmv1.Cluster
 	)
 
 	BeforeEach(func() {
@@ -109,6 +109,57 @@ var _ = Describe("PrintClusterInfo", func() {
 			Expect(output).To(ContainSubstring("Hypershift Enabled:       false\n"))
 			Expect(output).To(ContainSubstring("Version:                  4.14.8\n"))
 			Expect(output).To(ContainSubstring("Limited Support Status:   Fully Supported\n"))
+			Expect(output).To(ContainSubstring("Access Protection:        Enabled\n"))
+		})
+
+		It("should print if cluster is Fully Supported  ", func() {
+			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
+			mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(true, nil).AnyTimes()
+			clusterInfo.Status().LimitedSupportReasonCount()
+
+			err := PrintClusterInfo(clusterID)
+			Expect(err).To(BeNil())
+
+			// Capture the output
+			w.Close()
+			os.Stdout = oldStdout
+			_, _ = buf.ReadFrom(r)
+
+			output := buf.String()
+			Expect(output).To(ContainSubstring(fmt.Sprintf("Cluster ID:               %s\n", clusterID)))
+			Expect(output).To(ContainSubstring("Cluster Name:             Test Cluster\n"))
+			Expect(output).To(ContainSubstring("Cluster Status:           ready\n"))
+			Expect(output).To(ContainSubstring("Cluster Region:           us-east-1\n"))
+			Expect(output).To(ContainSubstring("Cluster Provider:         aws\n"))
+			Expect(output).To(ContainSubstring("Hypershift Enabled:       false\n"))
+			Expect(output).To(ContainSubstring("Version:                  4.14.8\n"))
+			Expect(output).To(ContainSubstring("Limited Support Status:   Fully Supported\n"))
+			Expect(output).To(ContainSubstring("Access Protection:        Enabled\n"))
+		})
+
+		It("should print if cluster is Limited Support  ", func() {
+			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
+			mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(true, nil).AnyTimes()
+
+			clusterInfo.Status().LimitedSupportReasonCount()
+
+			err := PrintClusterInfo(clusterID)
+			Expect(err).To(BeNil())
+
+			// Capture the output
+			w.Close()
+			os.Stdout = oldStdout
+			_, _ = buf.ReadFrom(r)
+
+			output := buf.String()
+			Expect(output).To(ContainSubstring(fmt.Sprintf("Cluster ID:               %s\n", clusterID)))
+			Expect(output).To(ContainSubstring("Cluster Name:             Test Cluster\n"))
+			Expect(output).To(ContainSubstring("Cluster Status:           ready\n"))
+			Expect(output).To(ContainSubstring("Cluster Region:           us-east-1\n"))
+			Expect(output).To(ContainSubstring("Cluster Provider:         aws\n"))
+			Expect(output).To(ContainSubstring("Hypershift Enabled:       false\n"))
+			Expect(output).To(ContainSubstring("Version:                  4.14.8\n"))
+			Expect(output).To(ContainSubstring("Limited Support Status:   Limited Support\n"))
 			Expect(output).To(ContainSubstring("Access Protection:        Enabled\n"))
 		})
 	})

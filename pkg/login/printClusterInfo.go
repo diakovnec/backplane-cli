@@ -66,4 +66,5 @@ func GetLimitedSupportStatus(clusterID string) string {
 		fmt.Printf("%-25s %s", "Limited Support Status: ", "Limited Support\n")
 	}
 	return fmt.Sprintf("%d", clusterInfo.Status().LimitedSupportReasonCount())
+
 }
