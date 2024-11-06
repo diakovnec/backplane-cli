@@ -22,13 +22,12 @@ func PrintClusterInfo(clusterID string) error {
 	fmt.Printf("\n%-25s %s\n", "Cluster ID:", clusterInfo.ID())
 	fmt.Printf("%-25s %s\n", "Cluster Name:", clusterInfo.Name())
 	fmt.Printf("%-25s %s\n", "Cluster Status:", clusterInfo.State())
-	//fmt.Printf("%-25s %s\n", "Cluster Status:", clusterInfo.Status().State())
 	fmt.Printf("%-25s %s\n", "Cluster Region:", clusterInfo.Region().ID())
 	fmt.Printf("%-25s %s\n", "Cluster Provider:", clusterInfo.CloudProvider().ID())
 	fmt.Printf("%-25s %t\n", "Hypershift Enabled:", clusterInfo.Hypershift().Enabled())
 	fmt.Printf("%-25s %s\n", "Version:", clusterInfo.OpenshiftVersion())
-	//PrintAccessProtectionStatus(clusterID)
 	GetLimitedSupportStatus(clusterID)
+	PrintAccessProtectionStatus(clusterID)
 
 	logger.Info("Basic cluster information displayed.")
 	return nil
@@ -46,9 +45,9 @@ func PrintAccessProtectionStatus(clusterID string) {
 	defer ocmConnection.Close()
 	enabled, _ := ocm.DefaultOCMInterface.IsClusterAccessProtectionEnabled(ocmConnection, clusterID)
 	if enabled {
-		fmt.Printf("%-25s %s", "Access Protection:", "Enabled\n")
+		fmt.Printf("%-25s %s\n", "Access Protection:", "Enabled\n")
 	} else {
-		fmt.Printf("%-25s %s", "Access Protection:", "Disabled\n")
+		fmt.Printf("%-25s %s\n", "Access Protection:", "Disabled\n")
 	}
 
 }
@@ -59,9 +58,9 @@ func GetLimitedSupportStatus(clusterID string) string {
 		return "Error retrieving cluster info: " + err.Error()
 	}
 	if clusterInfo.Status().LimitedSupportReasonCount() == 0 {
-		fmt.Printf("%-25s %s\n", "Limited Support Status: ", "Fully Supported\n")
+		fmt.Printf("%-25s %s", "Limited Support Status: ", "Fully Supported\n")
 	} else {
-		fmt.Printf("%-25s %s\n", "Limited Support Status: ", "Limited Support\n")
+		fmt.Printf("%-25s %s", "Limited Support Status: ", "Limited Support\n")
 	}
 	return fmt.Sprintf("%d", clusterInfo.Status().LimitedSupportReasonCount())
 }
