@@ -29,42 +29,76 @@ var _ = Describe("PrintClusterInfo", func() {
 		clusterInfo      *cmv1.Cluster
 	)
 
-	BeforeEach(func() {
-		mockCtrl = gomock.NewController(GinkgoT())
-		mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
-		ocmConnection = nil
-		ocm.DefaultOCMInterface = mockOcmInterface
+	// BeforeEach(func() {
+	// 	mockCtrl = gomock.NewController(GinkgoT())
+	// 	mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
+	// 	ocmConnection = nil
+	// 	ocm.DefaultOCMInterface = mockOcmInterface
 
-		clusterID = "test-cluster-id"
-		buf = new(bytes.Buffer)
-		log.SetOutput(buf)
+	// 	clusterID = "test-cluster-id"
+	// 	buf = new(bytes.Buffer)
+	// 	log.SetOutput(buf)
 
-		// Redirect standard output to the buffer
-		oldStdout = os.Stdout
-		r, w, _ = os.Pipe()
-		os.Stdout = w
+	// 	// Redirect standard output to the buffer
+	// 	oldStdout = os.Stdout
+	// 	r, w, _ = os.Pipe()
+	// 	os.Stdout = w
 
-		clusterInfo, _ = cmv1.NewCluster().
-			ID(clusterID).
-			Name("Test Cluster").
-			CloudProvider(cmv1.NewCloudProvider().ID("aws")).
-			State(cmv1.ClusterState("ready")).
-			Region(cmv1.NewCloudRegion().ID("us-east-1")).
-			Hypershift(cmv1.NewHypershift().Enabled(false)).
-			OpenshiftVersion("4.14.8").
-			Status(cmv1.NewClusterStatus().LimitedSupportReasonCount(0)).
-			Build()
+	// 	clusterInfo, _ = cmv1.NewCluster().
+	// 		ID(clusterID).
+	// 		Name("Test Cluster").
+	// 		CloudProvider(cmv1.NewCloudProvider().ID("aws")).
+	// 		State(cmv1.ClusterState("ready")).
+	// 		Region(cmv1.NewCloudRegion().ID("us-east-1")).
+	// 		Hypershift(cmv1.NewHypershift().Enabled(false)).
+	// 		OpenshiftVersion("4.14.8").
+	// 		Status(cmv1.NewClusterStatus().LimitedSupportReasonCount(0)).
+	// 		Build()
 
-		mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
-		mockOcmInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil).AnyTimes()
-	})
+	// 	mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
+	// 	mockOcmInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil).AnyTimes()
+	// })
 
-	AfterEach(func() {
-		// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
-		ocm.DefaultOCMInterface = nil
-	})
-
+	// AfterEach(func() {
+	// 	// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
+	// 	ocm.DefaultOCMInterface = nil
+	////////////////////////////////////////////////////////////////////////////
 	Context("When PrintClusterInfo is called", func() {
+		BeforeEach(func() {
+			mockCtrl = gomock.NewController(GinkgoT())
+			mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
+			ocmConnection = nil
+			ocm.DefaultOCMInterface = mockOcmInterface
+
+			clusterID = "test-cluster-id"
+			buf = new(bytes.Buffer)
+			log.SetOutput(buf)
+
+			// Redirect standard output to the buffer
+			oldStdout = os.Stdout
+			r, w, _ = os.Pipe()
+			os.Stdout = w
+
+			clusterInfo, _ = cmv1.NewCluster().
+				ID(clusterID).
+				Name("Test Cluster").
+				CloudProvider(cmv1.NewCloudProvider().ID("aws")).
+				State(cmv1.ClusterState("ready")).
+				Region(cmv1.NewCloudRegion().ID("us-east-1")).
+				Hypershift(cmv1.NewHypershift().Enabled(false)).
+				OpenshiftVersion("4.14.8").
+				Status(cmv1.NewClusterStatus().LimitedSupportReasonCount(0)).
+				Build()
+
+			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
+			mockOcmInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil).AnyTimes()
+		})
+
+		AfterEach(func() {
+			// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
+			ocm.DefaultOCMInterface = nil
+		})
+
 		It("should print cluster information with access protection disabled", func() {
 			mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(false, nil).AnyTimes()
 
@@ -111,10 +145,23 @@ var _ = Describe("PrintClusterInfo", func() {
 			Expect(output).To(ContainSubstring("Access Protection:        Enabled\n"))
 		})
 	})
-
+	//////////////////////////////////////////////////////////////////////////
 	Context("Limited Support set to 0", func() {
 		BeforeEach(func() {
-			// Create a new mock cluster with LimitedSupportReasonCount(0) specific to this test
+			mockCtrl = gomock.NewController(GinkgoT())
+			mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
+			ocmConnection = nil
+			ocm.DefaultOCMInterface = mockOcmInterface
+
+			clusterID = "test-cluster-id"
+			buf = new(bytes.Buffer)
+			log.SetOutput(buf)
+
+			// Redirect standard output to the buffer
+			oldStdout = os.Stdout
+			r, w, _ = os.Pipe()
+			os.Stdout = w
+
 			clusterInfo, _ = cmv1.NewCluster().
 				ID(clusterID).
 				Name("Test Cluster").
@@ -125,12 +172,20 @@ var _ = Describe("PrintClusterInfo", func() {
 				OpenshiftVersion("4.14.8").
 				Status(cmv1.NewClusterStatus().LimitedSupportReasonCount(0)).
 				Build()
-			// Mock the return of the updated clusterInfo for this test only
+
 			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
-			mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(true, nil).AnyTimes()
+			mockOcmInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil).AnyTimes()
+		})
+
+		AfterEach(func() {
+			// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
+			ocm.DefaultOCMInterface = nil
 		})
 
 		It("should print if cluster is Fully Supported", func() {
+
+			mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(true, nil).AnyTimes()
+
 			err := PrintClusterInfo(clusterID)
 			Expect(err).To(BeNil())
 
@@ -150,11 +205,25 @@ var _ = Describe("PrintClusterInfo", func() {
 			Expect(output).To(ContainSubstring("Limited Support Status:   Fully Supported\n"))
 			Expect(output).To(ContainSubstring("Access Protection:        Enabled\n"))
 		})
+
 	})
 
 	Context("Limited Support set to 1", func() {
 		BeforeEach(func() {
-			// Create a new mock cluster with LimitedSupportReasonCount(1) specific to this test
+			mockCtrl = gomock.NewController(GinkgoT())
+			mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
+			ocmConnection = nil
+			ocm.DefaultOCMInterface = mockOcmInterface
+
+			clusterID = "test-cluster-id"
+			buf = new(bytes.Buffer)
+			log.SetOutput(buf)
+
+			// Redirect standard output to the buffer
+			oldStdout = os.Stdout
+			r, w, _ = os.Pipe()
+			os.Stdout = w
+
 			clusterInfo, _ = cmv1.NewCluster().
 				ID(clusterID).
 				Name("Test Cluster").
@@ -165,12 +234,17 @@ var _ = Describe("PrintClusterInfo", func() {
 				OpenshiftVersion("4.14.8").
 				Status(cmv1.NewClusterStatus().LimitedSupportReasonCount(1)).
 				Build()
-			// Mock the return of the updated clusterInfo for this test only
+
 			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
-			mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(true, nil).AnyTimes()
+			mockOcmInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil).AnyTimes()
 		})
 
+		AfterEach(func() {
+			// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
+			ocm.DefaultOCMInterface = nil
+		})
 		It("should print if cluster is Limited Support", func() {
+			mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(true, nil).AnyTimes()
 			err := PrintClusterInfo(clusterID)
 			Expect(err).To(BeNil())
 
