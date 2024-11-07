@@ -60,10 +60,10 @@ func GetLimitedSupportStatus(clusterID string) string {
 	if err != nil {
 		return "Error retrieving cluster info: " + err.Error()
 	}
-	if clusterInfo.Status().LimitedSupportReasonCount() == 0 {
-		fmt.Printf("%-25s %s", "Limited Support Status: ", "Fully Supported\n")
-	} else {
+	if clusterInfo.Status().LimitedSupportReasonCount() != 0 {
 		fmt.Printf("%-25s %s", "Limited Support Status: ", "Limited Support\n")
+	} else {
+		fmt.Printf("%-25s %s", "Limited Support Status: ", "Fully Supported\n")
 	}
 	return fmt.Sprintf("%d", clusterInfo.Status().LimitedSupportReasonCount())
 

@@ -27,6 +27,7 @@ var _ = Describe("PrintClusterInfo", func() {
 		r, w             *os.File
 		ocmConnection    *ocmsdk.Connection
 		clusterInfo      *cmv1.Cluster
+		//clusterInfo2     *cmv1.Cluster
 	)
 
 	BeforeEach(func() {
@@ -137,11 +138,22 @@ var _ = Describe("PrintClusterInfo", func() {
 			Expect(output).To(ContainSubstring("Access Protection:        Enabled\n"))
 		})
 
-		It("should print if cluster is Limited Support  ", func() {
-			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
-			mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(true, nil).AnyTimes()
+		It("should print if cluster is Limited Support", func() {
 
-			clusterInfo.Status().LimitedSupportReasonCount()
+			// Create a new mock cluster with LimitedSupportReasonCount(3) specific to this test
+			clusterInfo2, _ := cmv1.NewCluster().
+				ID(clusterID).
+				Name("Test Cluster").
+				CloudProvider(cmv1.NewCloudProvider().ID("aws")).
+				State(cmv1.ClusterState("ready")).
+				Region(cmv1.NewCloudRegion().ID("us-east-1")).
+				Hypershift(cmv1.NewHypershift().Enabled(false)).
+				OpenshiftVersion("4.14.8").
+				Status(cmv1.NewClusterStatus().LimitedSupportReasonCount(3)). // Set to 3 here for Limited Support
+				Build()
+			// Mock the return of the updated clusterInfo for this test only
+			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo2, nil).AnyTimes()
+			mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(true, nil).AnyTimes()
 
 			err := PrintClusterInfo(clusterID)
 			Expect(err).To(BeNil())
@@ -162,6 +174,7 @@ var _ = Describe("PrintClusterInfo", func() {
 			Expect(output).To(ContainSubstring("Limited Support Status:   Limited Support\n"))
 			Expect(output).To(ContainSubstring("Access Protection:        Enabled\n"))
 		})
+
 	})
 })
 
