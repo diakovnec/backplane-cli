@@ -29,21 +29,21 @@ var _ = Describe("PrintClusterInfo", func() {
 		clusterInfo      *cmv1.Cluster
 	)
 
-	// BeforeEach(func() {
-	// 	mockCtrl = gomock.NewController(GinkgoT())
-	// 	mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
-	// 	ocmConnection = nil
-	// 	ocm.DefaultOCMInterface = mockOcmInterface
+	BeforeEach(func() {
+		mockCtrl = gomock.NewController(GinkgoT())
+		mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
+		ocmConnection = nil
+		ocm.DefaultOCMInterface = mockOcmInterface
 
-	// 	clusterID = "test-cluster-id"
-	// 	buf = new(bytes.Buffer)
-	// 	log.SetOutput(buf)
+		clusterID = "test-cluster-id"
+		buf = new(bytes.Buffer)
+		log.SetOutput(buf)
 
-	// 	// Redirect standard output to the buffer
-	// 	oldStdout = os.Stdout
-	// 	r, w, _ = os.Pipe()
-	// 	os.Stdout = w
-
+		// Redirect standard output to the buffer
+		oldStdout = os.Stdout
+		r, w, _ = os.Pipe()
+		os.Stdout = w
+	})
 	// 	clusterInfo, _ = cmv1.NewCluster().
 	// 		ID(clusterID).
 	// 		Name("Test Cluster").
@@ -59,25 +59,13 @@ var _ = Describe("PrintClusterInfo", func() {
 	// 	mockOcmInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil).AnyTimes()
 	// })
 
-	// AfterEach(func() {
-	// 	// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
-	// 	ocm.DefaultOCMInterface = nil
+	AfterEach(func() {
+		// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
+		ocm.DefaultOCMInterface = nil
+	})
 	////////////////////////////////////////////////////////////////////////////
-	Context("When PrintClusterInfo is called", func() {
+	Context("Cluster protection status", func() {
 		BeforeEach(func() {
-			mockCtrl = gomock.NewController(GinkgoT())
-			mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
-			ocmConnection = nil
-			ocm.DefaultOCMInterface = mockOcmInterface
-
-			clusterID = "test-cluster-id"
-			buf = new(bytes.Buffer)
-			log.SetOutput(buf)
-
-			// Redirect standard output to the buffer
-			oldStdout = os.Stdout
-			r, w, _ = os.Pipe()
-			os.Stdout = w
 
 			clusterInfo, _ = cmv1.NewCluster().
 				ID(clusterID).
@@ -92,11 +80,6 @@ var _ = Describe("PrintClusterInfo", func() {
 
 			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
 			mockOcmInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil).AnyTimes()
-		})
-
-		AfterEach(func() {
-			// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
-			ocm.DefaultOCMInterface = nil
 		})
 
 		It("should print cluster information with access protection disabled", func() {
@@ -148,19 +131,6 @@ var _ = Describe("PrintClusterInfo", func() {
 	//////////////////////////////////////////////////////////////////////////
 	Context("Limited Support set to 0", func() {
 		BeforeEach(func() {
-			mockCtrl = gomock.NewController(GinkgoT())
-			mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
-			ocmConnection = nil
-			ocm.DefaultOCMInterface = mockOcmInterface
-
-			clusterID = "test-cluster-id"
-			buf = new(bytes.Buffer)
-			log.SetOutput(buf)
-
-			// Redirect standard output to the buffer
-			oldStdout = os.Stdout
-			r, w, _ = os.Pipe()
-			os.Stdout = w
 
 			clusterInfo, _ = cmv1.NewCluster().
 				ID(clusterID).
@@ -175,11 +145,6 @@ var _ = Describe("PrintClusterInfo", func() {
 
 			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
 			mockOcmInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil).AnyTimes()
-		})
-
-		AfterEach(func() {
-			// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
-			ocm.DefaultOCMInterface = nil
 		})
 
 		It("should print if cluster is Fully Supported", func() {
@@ -210,19 +175,6 @@ var _ = Describe("PrintClusterInfo", func() {
 
 	Context("Limited Support set to 1", func() {
 		BeforeEach(func() {
-			mockCtrl = gomock.NewController(GinkgoT())
-			mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
-			ocmConnection = nil
-			ocm.DefaultOCMInterface = mockOcmInterface
-
-			clusterID = "test-cluster-id"
-			buf = new(bytes.Buffer)
-			log.SetOutput(buf)
-
-			// Redirect standard output to the buffer
-			oldStdout = os.Stdout
-			r, w, _ = os.Pipe()
-			os.Stdout = w
 
 			clusterInfo, _ = cmv1.NewCluster().
 				ID(clusterID).
@@ -239,10 +191,6 @@ var _ = Describe("PrintClusterInfo", func() {
 			mockOcmInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil).AnyTimes()
 		})
 
-		AfterEach(func() {
-			// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
-			ocm.DefaultOCMInterface = nil
-		})
 		It("should print if cluster is Limited Support", func() {
 			mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(ocmConnection, clusterID).Return(true, nil).AnyTimes()
 			err := PrintClusterInfo(clusterID)
