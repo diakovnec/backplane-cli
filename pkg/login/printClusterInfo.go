@@ -28,7 +28,6 @@ func PrintClusterInfo(clusterID string) error {
 	fmt.Printf("%-25s %s\n", "Version:", clusterInfo.OpenshiftVersion())
 	GetLimitedSupportStatus(clusterID)
 	GetAccessProtectionStatus(clusterID)
-
 	logger.Info("Basic cluster information displayed.")
 	return nil
 }
