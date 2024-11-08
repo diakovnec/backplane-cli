@@ -15,7 +15,7 @@ func PrintClusterInfo(clusterID string) error {
 	// Retrieve cluster information
 	clusterInfo, err := ocm.DefaultOCMInterface.GetClusterInfoByID(clusterID)
 	if err != nil {
-		return fmt.Errorf("error retrieving cluster info: %v", err)
+		return fmt.Errorf("error retrieving cluster info: %w", err)
 	}
 
 	// Display cluster information
@@ -27,32 +27,36 @@ func PrintClusterInfo(clusterID string) error {
 	fmt.Printf("%-25s %t\n", "Hypershift Enabled:", clusterInfo.Hypershift().Enabled())
 	fmt.Printf("%-25s %s\n", "Version:", clusterInfo.OpenshiftVersion())
 	GetLimitedSupportStatus(clusterID)
-	PrintAccessProtectionStatus(clusterID)
+	GetAccessProtectionStatus(clusterID)
 
 	logger.Info("Basic cluster information displayed.")
 	return nil
-
 }
 
 // PrintAccessProtectionStatus retrieves and displays the access protection status of the target cluster.
 
-func PrintAccessProtectionStatus(clusterID string) {
+func GetAccessProtectionStatus(clusterID string) string {
 	ocmConnection, err := ocm.DefaultOCMInterface.SetupOCMConnection()
 	if err != nil {
 		fmt.Println("Error setting up OCM connection: ", err)
-		return
+		return "Error setting up OCM connection: " + err.Error()
 	}
 	if ocmConnection != nil {
 		defer ocmConnection.Close()
 	}
-
-	enabled, _ := ocm.DefaultOCMInterface.IsClusterAccessProtectionEnabled(ocmConnection, clusterID)
-	if enabled {
-		fmt.Printf("%-25s %s\n", "Access Protection:", "Enabled\n")
-	} else {
-		fmt.Printf("%-25s %s\n", "Access Protection:", "Disabled\n")
+	enabled, err := ocm.DefaultOCMInterface.IsClusterAccessProtectionEnabled(ocmConnection, clusterID)
+	if err != nil {
+		fmt.Println("Error retrieving access protection status: ", err)
+		return "Error retrieving access protection status: " + err.Error()
 	}
 
+	accessProtectionStatus := "Disabled"
+	if enabled {
+		accessProtectionStatus = "Enabled"
+	}
+	fmt.Printf("%-25s %s\n", "Access Protection:", accessProtectionStatus)
+
+	return accessProtectionStatus
 }
 
 func GetLimitedSupportStatus(clusterID string) string {
@@ -66,5 +70,4 @@ func GetLimitedSupportStatus(clusterID string) string {
 		fmt.Printf("%-25s %s", "Limited Support Status: ", "Fully Supported\n")
 	}
 	return fmt.Sprintf("%d", clusterInfo.Status().LimitedSupportReasonCount())
-
 }
