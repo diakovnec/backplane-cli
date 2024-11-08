@@ -49,7 +49,7 @@ var _ = Describe("PrintClusterInfo", func() {
 		// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
 		ocm.DefaultOCMInterface = nil
 	})
-	////////////////////////////////////////////////////////////////////////////
+
 	Context("Cluster protection status", func() {
 		BeforeEach(func() {
 
@@ -114,7 +114,7 @@ var _ = Describe("PrintClusterInfo", func() {
 			Expect(output).To(ContainSubstring("Access Protection:        Enabled\n"))
 		})
 	})
-	//////////////////////////////////////////////////////////////////////////
+
 	Context("Limited Support set to 0", func() {
 		BeforeEach(func() {
 
