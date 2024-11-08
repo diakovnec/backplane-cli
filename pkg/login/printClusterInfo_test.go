@@ -44,20 +44,6 @@ var _ = Describe("PrintClusterInfo", func() {
 		r, w, _ = os.Pipe()
 		os.Stdout = w
 	})
-	// 	clusterInfo, _ = cmv1.NewCluster().
-	// 		ID(clusterID).
-	// 		Name("Test Cluster").
-	// 		CloudProvider(cmv1.NewCloudProvider().ID("aws")).
-	// 		State(cmv1.ClusterState("ready")).
-	// 		Region(cmv1.NewCloudRegion().ID("us-east-1")).
-	// 		Hypershift(cmv1.NewHypershift().Enabled(false)).
-	// 		OpenshiftVersion("4.14.8").
-	// 		Status(cmv1.NewClusterStatus().LimitedSupportReasonCount(0)).
-	// 		Build()
-
-	// 	mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
-	// 	mockOcmInterface.EXPECT().SetupOCMConnection().Return(ocmConnection, nil).AnyTimes()
-	// })
 
 	AfterEach(func() {
 		// Reset the ocm.DefaultOCMInterface to avoid side effects in other tests
