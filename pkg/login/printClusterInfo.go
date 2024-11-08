@@ -32,8 +32,6 @@ func PrintClusterInfo(clusterID string) error {
 	return nil
 }
 
-// PrintAccessProtectionStatus retrieves and displays the access protection status of the target cluster.
-
 func GetAccessProtectionStatus(clusterID string) string {
 	ocmConnection, err := ocm.DefaultOCMInterface.SetupOCMConnection()
 	if err != nil {
