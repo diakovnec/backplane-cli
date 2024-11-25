@@ -3,6 +3,7 @@ package login
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -48,6 +49,7 @@ var (
 		pd               string
 		defaultNamespace string
 		ohss             string
+		printClusterInfo bool
 	}
 
 	// loginType derive the login type based on flags and args
@@ -124,6 +126,11 @@ func init() {
 		"ohss",
 		"",
 		"Login using JIRA Id",
+	)
+	flag.BoolVar(
+		&args.printClusterInfo,
+		"print-cluster-info",
+		false, "Print cluster information",
 	)
 
 }
