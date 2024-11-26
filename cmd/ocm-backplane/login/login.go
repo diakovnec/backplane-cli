@@ -3,7 +3,6 @@ package login
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -127,7 +126,7 @@ func init() {
 		"",
 		"Login using JIRA Id",
 	)
-	flag.BoolVar(
+	flags.BoolVar(
 		&args.printClusterInfo,
 		"print-cluster-info",
 		false, "Print cluster information",
@@ -213,8 +212,13 @@ func runLogin(cmd *cobra.Command, argv []string) (err error) {
 		"Name": clusterName}).Infoln("Target cluster")
 
 	//PrintClusterInfo After Login
-	if err := login.PrintClusterInfo(clusterID); err != nil {
-		return fmt.Errorf("failed to print cluster info: %v", err)
+	//if err := login.PrintClusterInfo(clusterID); err != nil {
+	//	return fmt.Errorf("failed to print cluster info: %v", err)
+	//}
+	if args.printClusterInfo {
+		if err := login.PrintClusterInfo(clusterID); err != nil {
+			return fmt.Errorf("failed to print cluster info: %v", err)
+		}
 	}
 
 	if globalOpts.Manager {
