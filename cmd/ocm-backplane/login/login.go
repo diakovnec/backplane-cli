@@ -48,7 +48,7 @@ var (
 		pd               string
 		defaultNamespace string
 		ohss             string
-		printClusterInfo bool
+		clusterInfo      bool
 	}
 
 	// loginType derive the login type based on flags and args
@@ -127,8 +127,8 @@ func init() {
 		"Login using JIRA Id",
 	)
 	flags.BoolVar(
-		&args.printClusterInfo,
-		"print-cluster-info",
+		&args.clusterInfo,
+		"cluster-info",
 		false, "Print cluster information",
 	)
 
@@ -215,7 +215,7 @@ func runLogin(cmd *cobra.Command, argv []string) (err error) {
 	//if err := login.PrintClusterInfo(clusterID); err != nil {
 	//	return fmt.Errorf("failed to print cluster info: %v", err)
 	//}
-	if args.printClusterInfo {
+	if args.clusterInfo {
 		if err := login.PrintClusterInfo(clusterID); err != nil {
 			return fmt.Errorf("failed to print cluster info: %v", err)
 		}
