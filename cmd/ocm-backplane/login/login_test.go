@@ -1,10 +1,12 @@
 package login
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -241,7 +243,87 @@ var _ = Describe("Login command", func() {
 		BeforeEach(func() {
 			globalOpts.Manager = false
 			globalOpts.Service = false
+			args.clusterInfo = false
 		})
+		Context("check cluster login", func() {
+			BeforeEach(func() {
+				globalOpts.Manager = false
+				globalOpts.Service = false
+				args.clusterInfo = false
+			})
+			It("when display cluster info is set to true", func() {
+				err := utils.CreateTempKubeConfig(nil)
+				args.defaultNamespace = "default"
+				args.clusterInfo = true
+				Expect(err).To(BeNil())
+				mockOcmInterface.EXPECT().GetOCMEnvironment().Return(ocmEnv, nil).AnyTimes()
+				mockOcmInterface.EXPECT().GetTargetCluster(testClusterID).Return(trueClusterID, testClusterID, nil)
+				mockOcmInterface.EXPECT().IsClusterHibernating(gomock.Eq(trueClusterID)).Return(false, nil).AnyTimes()
+				mockOcmInterface.EXPECT().GetOCMAccessToken().Return(&testToken, nil)
+				mockClientUtil.EXPECT().MakeRawBackplaneAPIClientWithAccessToken(backplaneAPIURI, testToken).Return(mockClient, nil)
+				mockClient.EXPECT().LoginCluster(gomock.Any(), gomock.Eq(trueClusterID)).Return(fakeResp, nil)
+				mockOcmInterface.EXPECT().GetClusterInfoByID(gomock.Any()).Return(mockCluster, nil).AnyTimes()
+				mockOcmInterface.EXPECT().SetupOCMConnection().Return(nil, nil)
+				mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(gomock.Any(), trueClusterID).Return(false, nil)
+
+				err = runLogin(nil, []string{testClusterID})
+
+				Expect(err).To(BeNil())
+			})
+
+			Context("check cluster login", func() {
+				BeforeEach(func() {
+					globalOpts.Manager = false
+					globalOpts.Service = false
+					args.clusterInfo = false
+				})
+				It("should not display cluster info when clusterInfo is set to false", func() {
+					err := utils.CreateTempKubeConfig(nil)
+					Expect(err).To(BeNil())
+					args.defaultNamespace = "default"
+					args.clusterInfo = false
+
+					mockOcmInterface.EXPECT().GetOCMEnvironment().Return(ocmEnv, nil).AnyTimes()
+					mockOcmInterface.EXPECT().GetTargetCluster(testClusterID).Return(trueClusterID, testClusterID, nil)
+					mockOcmInterface.EXPECT().IsClusterHibernating(gomock.Eq(trueClusterID)).Return(false, nil).AnyTimes()
+					mockOcmInterface.EXPECT().GetOCMAccessToken().Return(&testToken, nil)
+					mockClientUtil.EXPECT().MakeRawBackplaneAPIClientWithAccessToken(backplaneAPIURI, testToken).Return(mockClient, nil)
+					mockClient.EXPECT().LoginCluster(gomock.Any(), gomock.Eq(trueClusterID)).Return(fakeResp, nil)
+					mockOcmInterface.EXPECT().GetClusterInfoByID(gomock.Any()).Return(mockCluster, nil).AnyTimes()
+					mockOcmInterface.EXPECT().SetupOCMConnection().Return(nil, nil).AnyTimes()
+					mockOcmInterface.EXPECT().IsClusterAccessProtectionEnabled(gomock.Any(), trueClusterID).Return(false, nil).AnyTimes()
+
+					// Redirect standard output and log output to a buffer
+					var buf bytes.Buffer
+					originalStdout := os.Stdout
+					originalStderr := os.Stderr
+					r, w, _ := os.Pipe()
+					os.Stdout = w
+					os.Stderr = w
+					log.SetOutput(&buf)
+					defer func() {
+						log.SetOutput(os.Stderr)
+						os.Stdout = originalStdout
+						os.Stderr = originalStderr
+						w.Close()
+					}()
+
+					err = runLogin(nil, []string{testClusterID})
+					Expect(err).To(BeNil())
+
+					// Read the buffer content
+					w.Close()
+					var outputBuf bytes.Buffer
+					io.Copy(&outputBuf, r)
+					output := outputBuf.String()
+
+					// Ensure that cluster info is not printed
+					Expect(output).NotTo(ContainSubstring("Cluster ID:"))
+					Expect(output).NotTo(ContainSubstring("Cluster Name:"))
+				})
+			})
+		})
+
 		It("when running with a simple case should work as expected", func() {
 			err := utils.CreateTempKubeConfig(nil)
 			Expect(err).To(BeNil())
