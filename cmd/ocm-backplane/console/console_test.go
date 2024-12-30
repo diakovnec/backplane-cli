@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/pflag"
+	"github.com/stretchr/testify/mock"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -28,10 +29,43 @@ import (
 	"github.com/openshift/backplane-cli/pkg/utils"
 )
 
+//Mocking ContainerEngineInterface to test the console command
+
+type MockContainerEngineInterface struct {
+	mock.Mock
+}
+
+func (m *MockContainerEngineInterface) containerIsExist(containerName string) (bool, error) {
+	args := m.Called(containerName)
+	return args.Bool(0), args.Error(1)
+}
+func (m *MockContainerEngineInterface) pullImage(image string) error {
+	args := m.Called(image)
+	return args.Error(0)
+}
+func (m *MockContainerEngineInterface) putFileToMount(path string, content []byte) error {
+	args := m.Called(path, content)
+	return args.Error(0)
+}
+func (m *MockContainerEngineInterface) runConsoleContainer(image string, name string, args []string, envVars []envVar) error {
+	callArgs := m.Called(image, name, args, envVars)
+	return callArgs.Error(0)
+}
+func (m *MockContainerEngineInterface) stopContainer(containerName string) error {
+	args := m.Called(containerName)
+	return args.Error(0)
+}
+func (m *MockContainerEngineInterface) runMonitorPlugin(image string, name string, version string, args []string) error {
+	callArgs := m.Called(image, name, version, args)
+	return callArgs.Error(0)
+}
+
 var _ = Describe("console command", func() {
 	var (
 		mockCtrl         *gomock.Controller
 		mockOcmInterface *ocmMock.MockOCMInterface
+		mockCe           *MockContainerEngineInterface
+		o                *consoleOptions
 
 		capturedCommands [][]string
 
@@ -46,6 +80,7 @@ var _ = Describe("console command", func() {
 		mockCtrl = gomock.NewController(GinkgoT())
 		mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
 		ocm.DefaultOCMInterface = mockOcmInterface
+		mockCe = new(MockContainerEngineInterface)
 
 		os.Setenv("CONTAINER_ENGINE", PODMAN)
 
@@ -115,6 +150,38 @@ var _ = Describe("console command", func() {
 		Expect(err).To(BeNil())
 	}
 	Context("Should perform existing pods cleanup before starting the console", func() {
+		It("should stop containers when they exist", func() {
+			setupConfig()
+			o = &consoleOptions{}
+			containersToCleanUp := []string{
+				fmt.Sprintf("monitoring-plugin-%s", clusterID),
+				fmt.Sprintf("console-%s", clusterID),
+			}
+			mockCe.On("containerIsExist", containersToCleanUp[0]).Return(true, nil).Times(1)
+			mockCe.On("containerIsExist", containersToCleanUp[1]).Return(true, nil).Times(1)
+			mockCe.On("stopContainer", containersToCleanUp[0]).Return(nil).Times(1)
+			mockCe.On("stopContainer", containersToCleanUp[1]).Return(nil).Times(1)
+
+			err := o.beforeStartCleanUp(mockCe)
+			Expect(err).To(BeNil())
+			mockCe.AssertExpectations(GinkgoT())
+		})
+
+		It("Shoul print an error when stopping containers fails", func() {
+			setupConfig()
+			o = &consoleOptions{}
+			containersToCleanUp := []string{
+				fmt.Sprintf("monitoring-plugin-%s", clusterID),
+				fmt.Sprintf("console-%s", clusterID),
+			}
+			mockCe.On("containerIsExist", containersToCleanUp[0]).Return(true, nil).Times(1)
+			mockCe.On("stopContainer", containersToCleanUp[0]).Return(fmt.Errorf("failed to stop container")).Times(1)
+
+			err := o.beforeStartCleanUp(mockCe)
+			Expect(err).To(MatchError("failed to stop container monitoring-plugin-cluster123 during the cleanup process: failed to stop container"))
+			mockCe.AssertExpectations(GinkgoT(2))
+		})
+
 		It("Should not return an error if no pods are found", func() {
 			setupConfig()
 			createPathPodman()
