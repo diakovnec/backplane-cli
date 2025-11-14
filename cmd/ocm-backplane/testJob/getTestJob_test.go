@@ -6,7 +6,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/cobra"
@@ -76,12 +76,12 @@ var _ = Describe("testJob get command", func() {
 			StatusCode: http.StatusOK,
 		}
 		fakeResp.Header.Add("Content-Type", "json")
-		os.Setenv(info.BackplaneURLEnvName, proxyURI)
+		_ = os.Setenv(info.BackplaneURLEnvName, proxyURI)
 		ocmEnv, _ = cmv1.NewEnvironment().BackplaneURL("https://dummy.api").Build()
 	})
 
 	AfterEach(func() {
-		os.Setenv(info.BackplaneURLEnvName, "")
+		_ = os.Setenv(info.BackplaneURLEnvName, "")
 		_ = os.RemoveAll(tempDir)
 		mockCtrl.Finish()
 	})

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/openshift/backplane-cli/pkg/ocm"
@@ -33,7 +33,7 @@ var _ = Describe("console container implementation", func() {
 		mockOcmInterface = ocmMock.NewMockOCMInterface(mockCtrl)
 		ocm.DefaultOCMInterface = mockOcmInterface
 
-		os.Setenv("CONTAINER_ENGINE", PODMAN)
+		_ = os.Setenv("CONTAINER_ENGINE", PODMAN)
 
 		capturedCommands = nil
 		createCommand = func(prog string, args ...string) *exec.Cmd {
@@ -58,7 +58,7 @@ var _ = Describe("console container implementation", func() {
 	})
 
 	AfterEach(func() {
-		os.Setenv("HTTPS_PROXY", "")
+		_ = os.Setenv("HTTPS_PROXY", "")
 		mockCtrl.Finish()
 		utils.RemoveTempKubeConfig()
 	})
@@ -119,4 +119,89 @@ var _ = Describe("console container implementation", func() {
 		})
 	})
 
+	Context("when running monitoring plugin container in podman", func() {
+		It("should pass argments and environment variable to podman if specified", func() {
+			ce := podmanMac{}
+			mockOcmInterface.EXPECT().GetPullSecret().Return(pullSecret, nil).AnyTimes()
+			capturedCommands = nil
+			args := []string{"arg1"}
+			envvars := []EnvVar{{Key: "testkey", Value: "testval"}}
+			err := ce.RunMonitorPlugin("monitoring-plugin-1234", "console-1234", "/tmp/nginx.conf", args, envvars)
+			Expect(err).To(BeNil())
+			Expect(len(capturedCommands)).To(Equal(1))
+			fullCommand := strings.Join(capturedCommands[0], " ")
+			// arg
+			Expect(fullCommand).To(ContainSubstring("arg1"))
+			// env var
+			Expect(fullCommand).To(ContainSubstring("--env"))
+			Expect(fullCommand).To(ContainSubstring("testkey=testval"))
+		})
+		It("should not mount the nginx conf file if the path is empty - Mac", func() {
+			ce := podmanMac{}
+			mockOcmInterface.EXPECT().GetPullSecret().Return(pullSecret, nil).AnyTimes()
+			capturedCommands = nil
+			args := []string{"arg1"}
+			envvars := []EnvVar{{Key: "testkey", Value: "testval"}}
+			err := ce.RunMonitorPlugin("monitoring-plugin-1234", "console-1234", "", args, envvars)
+			Expect(err).To(BeNil())
+			Expect(len(capturedCommands)).To(Equal(1))
+			fullCommand := strings.Join(capturedCommands[0], " ")
+			Expect(fullCommand).ToNot(ContainSubstring("--mount"))
+		})
+		It("should not mount the nginx conf file if the path is empty - Linux", func() {
+			ce := podmanLinux{}
+			mockOcmInterface.EXPECT().GetPullSecret().Return(pullSecret, nil).AnyTimes()
+			capturedCommands = nil
+			args := []string{"arg1"}
+			envvars := []EnvVar{{Key: "testkey", Value: "testval"}}
+			err := ce.RunMonitorPlugin("monitoring-plugin-1234", "console-1234", "", args, envvars)
+			Expect(err).To(BeNil())
+			Expect(len(capturedCommands)).To(Equal(1))
+			fullCommand := strings.Join(capturedCommands[0], " ")
+			Expect(fullCommand).ToNot(ContainSubstring("--mount"))
+		})
+	})
+
+	Context("when running monitoring plugin container in docker", func() {
+		It("should pass argments and environment variable to docker if specified", func() {
+			ce := dockerLinux{}
+			mockOcmInterface.EXPECT().GetPullSecret().Return(pullSecret, nil).AnyTimes()
+			capturedCommands = nil
+			args := []string{"arg1"}
+			envvars := []EnvVar{{Key: "testkey", Value: "testval"}}
+			err := ce.RunMonitorPlugin("monitoring-plugin-1234", "console-1234", "/tmp/nginx.conf", args, envvars)
+			Expect(err).To(BeNil())
+			Expect(len(capturedCommands)).To(Equal(1))
+			fullCommand := strings.Join(capturedCommands[0], " ")
+			// arg
+			Expect(fullCommand).To(ContainSubstring("arg1"))
+			// env var
+			Expect(fullCommand).To(ContainSubstring("--env"))
+			Expect(fullCommand).To(ContainSubstring("testkey=testval"))
+		})
+		It("should not mount the nginx conf file if the path is empty - Linux", func() {
+			ce := dockerLinux{}
+			mockOcmInterface.EXPECT().GetPullSecret().Return(pullSecret, nil).AnyTimes()
+			capturedCommands = nil
+			args := []string{"arg1"}
+			envvars := []EnvVar{{Key: "testkey", Value: "testval"}}
+			err := ce.RunMonitorPlugin("monitoring-plugin-1234", "console-1234", "", args, envvars)
+			Expect(err).To(BeNil())
+			Expect(len(capturedCommands)).To(Equal(1))
+			fullCommand := strings.Join(capturedCommands[0], " ")
+			Expect(fullCommand).ToNot(ContainSubstring("--volume"))
+		})
+		It("should not mount the nginx conf file if the path is empty - Mac", func() {
+			ce := dockerMac{}
+			mockOcmInterface.EXPECT().GetPullSecret().Return(pullSecret, nil).AnyTimes()
+			capturedCommands = nil
+			args := []string{"arg1"}
+			envvars := []EnvVar{{Key: "testkey", Value: "testval"}}
+			err := ce.RunMonitorPlugin("monitoring-plugin-1234", "console-1234", "", args, envvars)
+			Expect(err).To(BeNil())
+			Expect(len(capturedCommands)).To(Equal(1))
+			fullCommand := strings.Join(capturedCommands[0], " ")
+			Expect(fullCommand).ToNot(ContainSubstring("--volume"))
+		})
+	})
 })

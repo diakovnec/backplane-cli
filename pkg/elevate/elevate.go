@@ -18,6 +18,10 @@ var (
 	WriteKubeconfigToFile = utils.CreateTempKubeConfig
 )
 
+// RunElevate executes the elevation process for backplane access.
+// It reads the current kubeconfig, adds elevation context with the provided reason,
+// and optionally executes a command with elevated permissions.
+// The first argument is the elevation reason, remaining arguments are the command to execute.
 func RunElevate(argv []string) error {
 	logger.Debugln("Finding target cluster from kubeconfig")
 	config, err := ReadKubeConfigRaw()
@@ -54,10 +58,10 @@ func RunElevate(argv []string) error {
 	defer func() {
 		if oldKubeconfigDefined {
 			logger.Debugln("Will set KUBECONFIG variable to original", oldKubeconfigPath)
-			os.Setenv("KUBECONFIG", oldKubeconfigPath)
+			_ = os.Setenv("KUBECONFIG", oldKubeconfigPath)
 		} else {
 			logger.Debugln("Will unset KUBECONFIG variable")
-			os.Unsetenv("KUBECONFIG")
+			_ = os.Unsetenv("KUBECONFIG")
 		}
 	}()
 

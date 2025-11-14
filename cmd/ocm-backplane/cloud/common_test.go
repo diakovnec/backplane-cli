@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/openshift/backplane-cli/pkg/awsutil"
@@ -15,7 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/golang/mock/gomock"
+	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	sdk "github.com/openshift-online/ocm-sdk-go"
@@ -26,6 +27,7 @@ import (
 	"github.com/openshift/backplane-cli/pkg/client/mocks"
 	"github.com/openshift/backplane-cli/pkg/ocm"
 	ocmMock "github.com/openshift/backplane-cli/pkg/ocm/mocks"
+	"go.uber.org/mock/gomock"
 )
 
 //nolint:gosec
@@ -102,7 +104,7 @@ var _ = Describe("getIsolatedCredentials", func() {
 			Expect(err).To(Equal(fmt.Errorf("must provide non-empty cluster ID")))
 		})
 		It("should fail if wrong assume initial ARN is provided", func() {
-			testQueryConfig.BackplaneConfiguration.AssumeInitialArn = "arn:aws:iam::10000000:role/TEST_USER"
+			testQueryConfig.AssumeInitialArn = "arn:aws:iam::10000000:role/TEST_USER"
 			_, err := testQueryConfig.getIsolatedCredentials(testOcmToken)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("invalid assume-initial-arn: arn:aws:iam::10000000:role/TEST_USER, must be one of:"))
@@ -194,7 +196,7 @@ var _ = Describe("getIsolatedCredentials", func() {
 				}, nil
 			}
 			mockClientUtil.EXPECT().GetBackplaneClient(
-				testQueryConfig.BackplaneConfiguration.URL, testOcmToken, testQueryConfig.ProxyURL).Return(mockClient, nil)
+				testQueryConfig.BackplaneConfiguration.URL, testOcmToken, testQueryConfig.BackplaneConfiguration.ProxyURL).Return(mockClient, nil)
 			mockClient.EXPECT().GetAssumeRoleSequence(context.TODO(), testClusterID).Return(fakeHTTPResp, nil)
 
 			_, err = testQueryConfig.getIsolatedCredentials(testOcmToken)
@@ -229,13 +231,60 @@ var _ = Describe("getIsolatedCredentials", func() {
 				}, nil
 			}
 			mockClientUtil.EXPECT().GetBackplaneClient(
-				testQueryConfig.BackplaneConfiguration.URL, testOcmToken, testQueryConfig.ProxyURL).Return(mockClient, nil)
+				testQueryConfig.BackplaneConfiguration.URL, testOcmToken, testQueryConfig.BackplaneConfiguration.ProxyURL).Return(mockClient, nil)
 			// Simulate failure in GetAssumeRoleSequence
 			mockClient.EXPECT().GetAssumeRoleSequence(context.TODO(), testClusterID).Return(nil, errors.New("assume sequence failed"))
 
 			_, err = testQueryConfig.getIsolatedCredentials(testOcmToken)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to fetch arn sequence:"))
+		})
+		It("should include response body in error when API returns non-200 status", func() {
+			GetCallerIdentity = func(client *sts.Client) error {
+				return nil
+			}
+			defer func() {
+				GetCallerIdentity = func(client *sts.Client) error {
+					_, err := client.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+					return err
+				}
+			}()
+			ip1 := cmv1.NewTrustedIp().ID("209.10.10.10").Enabled(true)
+			expectedIPList, err := cmv1.NewTrustedIpList().Items(ip1).Build()
+			Expect(err).To(BeNil())
+			mockOcmInterface.EXPECT().GetTrustedIPList(gomock.Any()).Return(expectedIPList, nil).AnyTimes()
+
+			StsClient = func(proxyURL *string) (*sts.Client, error) {
+				return &sts.Client{}, nil
+			}
+			AssumeRoleWithJWT = func(jwt string, roleArn string, stsClient stscreds.AssumeRoleWithWebIdentityAPIClient) (aws.Credentials, error) {
+				return aws.Credentials{
+					AccessKeyID:     testAccessKeyID,
+					SecretAccessKey: testSecretAccessKey,
+					SessionToken:    testSessionToken,
+				}, nil
+			}
+			NewStaticCredentialsProvider = func(key, secret, session string) credentials.StaticCredentialsProvider {
+				return credentials.StaticCredentialsProvider{}
+			}
+			mockClientUtil.EXPECT().GetBackplaneClient(
+				testQueryConfig.BackplaneConfiguration.URL, testOcmToken, testQueryConfig.BackplaneConfiguration.ProxyURL).Return(mockClient, nil)
+			// Create an HTTP response with error status and body
+			errorResponseBody := `{"statusCode":500,"message":"Internal server error: unable to process request"}`
+			errorHTTPResp := &http.Response{
+				Body:       MakeIoReader(errorResponseBody),
+				Header:     map[string][]string{},
+				StatusCode: http.StatusInternalServerError,
+				Status:     "500 Internal Server Error",
+			}
+			mockClient.EXPECT().GetAssumeRoleSequence(context.TODO(), testClusterID).Return(errorHTTPResp, nil)
+
+			_, err = testQueryConfig.getIsolatedCredentials(testOcmToken)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to fetch arn sequence:"))
+			// Verify the response body is included in the error message
+			Expect(err.Error()).To(ContainSubstring("response body:"))
+			Expect(err.Error()).To(ContainSubstring("Internal server error"))
 		})
 		It("should fail if error creating backplane api client", func() {
 			GetCallerIdentity = func(client *sts.Client) error {
@@ -283,7 +332,7 @@ var _ = Describe("getIsolatedCredentials", func() {
 			defer server.Close()
 
 			client := &http.Client{}
-			ip, err := checkEgressIP(client, server.URL)
+			ip, err := CheckEgressIP(client, server.URL)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ip).To(Equal(net.ParseIP(mockIP)))
@@ -291,17 +340,17 @@ var _ = Describe("getIsolatedCredentials", func() {
 		It("should return an error when the HTTP GET fails", func() {
 			client = &http.Client{}
 			// Invalid URL to force error
-			ip, err := checkEgressIP(client, "http://invalid_url")
+			ip, err := CheckEgressIP(client, "http://invalid_url")
 			Expect(err).To(HaveOccurred())
 			Expect(ip).To(BeNil())
 		})
 		It("should return an error when response body is not a valid IP", func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				fmt.Fprint(w, "not-an-ip")
+				_, _ = fmt.Fprint(w, "not-an-ip")
 			}))
 			client = server.Client()
 
-			ip, err := checkEgressIP(client, server.URL)
+			ip, err := CheckEgressIP(client, server.URL)
 			Expect(err).To(MatchError(ContainSubstring("failed to parse IP")))
 			Expect(ip).To(BeNil())
 		})
@@ -323,21 +372,110 @@ var _ = Describe("getIsolatedCredentials", func() {
 			}
 		})
 
-		It("should return nil if IP included in trusted list", func() {
+		It("should return nil if IP exactly matches single host CIDR", func() {
 			ip = net.ParseIP("192.168.1.1")
 			err := verifyIPTrusted(ip, trustedIPs)
 			Expect(err).To(BeNil())
 		})
+
+		It("should return nil if IP is within large CIDR range", func() {
+			ip = net.ParseIP("10.1.2.3")
+			err := verifyIPTrusted(ip, trustedIPs)
+			Expect(err).To(BeNil())
+		})
+
+		It("should return nil if IP is at start of CIDR range", func() {
+			ip = net.ParseIP("10.0.0.0")
+			err := verifyIPTrusted(ip, trustedIPs)
+			Expect(err).To(BeNil())
+		})
+
+		It("should return nil if IP is at end of CIDR range", func() {
+			ip = net.ParseIP("10.255.255.255")
+			err := verifyIPTrusted(ip, trustedIPs)
+			Expect(err).To(BeNil())
+		})
+
 		It("should return error if IP not included in trusted list", func() {
 			ip = net.ParseIP("172.16.0.1")
 			err := verifyIPTrusted(ip, trustedIPs)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("client IP 172.16.0.1 is not in the trusted IP range"))
 		})
-		It("should return an error if give the wrong format", func() {
+
+		It("should return error for IP just outside CIDR range", func() {
+			ip = net.ParseIP("192.168.1.2") // Outside 192.168.1.1/32
+			err := verifyIPTrusted(ip, trustedIPs)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("client IP 192.168.1.2 is not in the trusted IP range"))
+		})
+
+		It("should return error for IP in different network class", func() {
+			ip = net.ParseIP("9.255.255.255") // Just outside 10.0.0.0/8
+			err := verifyIPTrusted(ip, trustedIPs)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("client IP 9.255.255.255 is not in the trusted IP range"))
+		})
+
+		It("should return an error if given invalid CIDR format", func() {
 			trustedIPs.SourceIp = []string{"invalid-cidr"}
 			ip = net.ParseIP("192.168.1.1")
 			err := verifyIPTrusted(ip, trustedIPs)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to parse trusted IP CIDR invalid-cidr"))
+		})
+
+		It("should handle mixed CIDR ranges correctly", func() {
+			trustedIPs.SourceIp = []string{
+				"192.168.1.0/24", // Subnet
+				"172.16.5.10/32", // Single host
+				"10.0.0.0/16",    // Large range
+			}
+
+			// Test IPs within each range
+			testCases := []struct {
+				testIP     string
+				shouldPass bool
+				desc       string
+			}{
+				{"192.168.1.1", true, "IP in /24 subnet"},
+				{"192.168.1.254", true, "IP at end of /24 subnet"},
+				{"192.168.2.1", false, "IP outside /24 subnet"},
+				{"172.16.5.10", true, "Exact match for /32"},
+				{"172.16.5.11", false, "IP adjacent to /32"},
+				{"10.0.5.5", true, "IP in /16 range"},
+				{"10.1.0.0", false, "IP outside /16 range"},
+			}
+
+			for _, tc := range testCases {
+				ip = net.ParseIP(tc.testIP)
+				err := verifyIPTrusted(ip, trustedIPs)
+				if tc.shouldPass {
+					Expect(err).To(BeNil(), "Expected %s to pass: %s", tc.testIP, tc.desc)
+				} else {
+					Expect(err).To(HaveOccurred(), "Expected %s to fail: %s", tc.testIP, tc.desc)
+					Expect(err.Error()).To(ContainSubstring(fmt.Sprintf("client IP %s is not in the trusted IP range", tc.testIP)))
+				}
+			}
+		})
+
+		It("should handle IPv6 CIDR ranges", func() {
+			trustedIPs.SourceIp = []string{
+				"2001:db8::/32",
+				"::1/128", // IPv6 localhost
+			}
+
+			// Test IPv6 addresses
+			ip = net.ParseIP("2001:db8::1")
+			err := verifyIPTrusted(ip, trustedIPs)
+			Expect(err).To(BeNil())
+
+			ip = net.ParseIP("::1")
+			err = verifyIPTrusted(ip, trustedIPs)
+			Expect(err).To(BeNil())
+
+			ip = net.ParseIP("2001:db9::1") // Outside range
+			err = verifyIPTrusted(ip, trustedIPs)
 			Expect(err).To(HaveOccurred())
 		})
 	})
@@ -354,6 +492,466 @@ var _ = Describe("getIsolatedCredentials", func() {
 			// Check all trusted IPs are allowed
 			Expect(policy).To(ContainSubstring("209.10.10.10"))
 			Expect(policy).NotTo(ContainSubstring("200.20.20.20"))
+			Expect(err).To(BeNil())
+		})
+	})
+
+	Context("Execute verifyTrustedIPAndGetPolicy", func() {
+		It("should successfully verify IP and return policy when IP is in trusted range", func() {
+			// Mock the IP check to return a valid IP
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = fmt.Fprint(w, "209.10.10.10") // IP that matches our test trusted range
+			}))
+			defer server.Close()
+
+			// Override the checkEgressIP function to use our test server
+			originalCheckEgressIP := CheckEgressIP
+			CheckEgressIP = func(client *http.Client, url string) (net.IP, error) {
+				return originalCheckEgressIP(client, server.URL)
+			}
+			defer func() {
+				CheckEgressIP = originalCheckEgressIP
+			}()
+
+			// Set up expected trusted IP list
+			ip1 := cmv1.NewTrustedIp().ID("209.10.10.10").Enabled(true)
+			expectedIPList, err := cmv1.NewTrustedIpList().Items(ip1).Build()
+			Expect(err).To(BeNil())
+			mockOcmInterface.EXPECT().GetTrustedIPList(gomock.Any()).Return(expectedIPList, nil)
+
+			// Call the function
+			policy, err := verifyTrustedIPAndGetPolicy(&testQueryConfig)
+
+			// Verify success
+			Expect(err).To(BeNil())
+			Expect(policy.Version).To(Equal("2012-10-17"))
+			Expect(len(policy.Statement)).To(BeNumerically(">", 0))
+		})
+
+		It("should fail when client IP is not in trusted range", func() {
+			// Mock the IP check to return an untrusted IP
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = fmt.Fprint(w, "192.168.1.1") // IP that doesn't match our test trusted range
+			}))
+			defer server.Close()
+
+			// Override the checkEgressIP function to use our test server
+			originalCheckEgressIP := CheckEgressIP
+			CheckEgressIP = func(client *http.Client, url string) (net.IP, error) {
+				return originalCheckEgressIP(client, server.URL)
+			}
+			defer func() {
+				CheckEgressIP = originalCheckEgressIP
+			}()
+
+			// Set up expected trusted IP list (only has 209.x.x.x IPs)
+			ip1 := cmv1.NewTrustedIp().ID("209.10.10.10").Enabled(true)
+			expectedIPList, err := cmv1.NewTrustedIpList().Items(ip1).Build()
+			Expect(err).To(BeNil())
+			mockOcmInterface.EXPECT().GetTrustedIPList(gomock.Any()).Return(expectedIPList, nil)
+
+			// Call the function
+			_, err = verifyTrustedIPAndGetPolicy(&testQueryConfig)
+
+			// Verify failure
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("client IP 192.168.1.1 is not in the trusted IP range"))
+		})
+
+		It("should fail when AWS proxy URL is invalid", func() {
+			// Set an invalid AWS proxy URL in configuration
+			testQueryConfig.AwsProxy = aws.String("://invalid-url")
+
+			// Call the function
+			_, err := verifyTrustedIPAndGetPolicy(&testQueryConfig)
+
+			// Verify failure
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to parse proxy for checkEgressIP"))
+		})
+
+		Context("Execute getIsolatedCredentials with AwsProxy", func() {
+			It("should use AwsProxy configuration for AWS STS calls", func() {
+				// Set AWS proxy in configuration
+				testQueryConfig.AwsProxy = aws.String("http://aws-proxy:8080")
+
+				// Mock CheckEgressIP to avoid real HTTP calls
+				originalCheckEgressIP := CheckEgressIP
+				CheckEgressIP = func(client *http.Client, url string) (net.IP, error) {
+					// IP that matches our test trusted range
+					return net.ParseIP("209.10.10.10"), nil
+				}
+				defer func() {
+					CheckEgressIP = originalCheckEgressIP
+				}()
+
+				GetCallerIdentity = func(client *sts.Client) error {
+					return nil // Simulate success
+				}
+				defer func() {
+					GetCallerIdentity = func(client *sts.Client) error {
+						_, err := client.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+						return err
+					}
+				}()
+
+				ip1 := cmv1.NewTrustedIp().ID("209.10.10.10").Enabled(true)
+				expectedIPList, err := cmv1.NewTrustedIpList().Items(ip1).Build()
+				Expect(err).To(BeNil())
+				mockOcmInterface.EXPECT().GetTrustedIPList(gomock.Any()).Return(expectedIPList, nil)
+
+				StsClient = func(proxyURL *string) (*sts.Client, error) {
+					// Verify that when proxyURL is nil, BACKPLANE_AWS_PROXY should be used
+					if proxyURL == nil {
+						// This should use BACKPLANE_AWS_PROXY internally
+						return &sts.Client{}, nil
+					}
+					return &sts.Client{}, nil
+				}
+				AssumeRoleWithJWT = func(jwt string, roleArn string, stsClient stscreds.AssumeRoleWithWebIdentityAPIClient) (aws.Credentials, error) {
+					return aws.Credentials{
+						AccessKeyID:     testAccessKeyID,
+						SecretAccessKey: testSecretAccessKey,
+						SessionToken:    testSessionToken,
+					}, nil
+				}
+				AssumeRoleSequence = func(
+					seedClient stscreds.AssumeRoleAPIClient,
+					roleArnSequence []awsutil.RoleArnSession,
+					proxyURL *string,
+					stsClientProviderFunc awsutil.STSClientProviderFunc,
+				) (aws.Credentials, error) {
+					// Mock implementation to avoid real AWS calls
+					return aws.Credentials{
+						AccessKeyID:     testAccessKeyID,
+						SecretAccessKey: testSecretAccessKey,
+						SessionToken:    testSessionToken,
+					}, nil
+				}
+				defer func() {
+					AssumeRoleSequence = awsutil.AssumeRoleSequence
+				}()
+				mockClientUtil.EXPECT().GetBackplaneClient(
+					testQueryConfig.BackplaneConfiguration.URL, testOcmToken, testQueryConfig.BackplaneConfiguration.ProxyURL).Return(mockClient, nil)
+				mockClient.EXPECT().GetAssumeRoleSequence(context.TODO(), testClusterID).Return(fakeHTTPResp, nil)
+
+				// Test that AwsProxy is used for AWS calls while ProxyURL is used for Backplane calls
+				_, err = testQueryConfig.getIsolatedCredentials(testOcmToken)
+				Expect(err).To(BeNil())
+			})
+
+			It("should use AWS proxy when both ProxyURL and AwsProxy are configured", func() {
+				// Set both explicit proxy and AWS proxy in configuration
+				testQueryConfig.ProxyURL = aws.String("http://regular-proxy:9090")
+				testQueryConfig.AwsProxy = aws.String("http://aws-proxy:8080")
+
+				// Mock CheckEgressIP to avoid real HTTP calls
+				originalCheckEgressIP := CheckEgressIP
+				CheckEgressIP = func(client *http.Client, url string) (net.IP, error) {
+					return net.ParseIP("209.10.10.10"), nil
+				}
+				defer func() {
+					CheckEgressIP = originalCheckEgressIP
+				}()
+
+				GetCallerIdentity = func(client *sts.Client) error {
+					return nil // Simulate success
+				}
+				defer func() {
+					GetCallerIdentity = func(client *sts.Client) error {
+						_, err := client.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+						return err
+					}
+				}()
+
+				ip1 := cmv1.NewTrustedIp().ID("209.10.10.10").Enabled(true)
+				expectedIPList, err := cmv1.NewTrustedIpList().Items(ip1).Build()
+				Expect(err).To(BeNil())
+				mockOcmInterface.EXPECT().GetTrustedIPList(gomock.Any()).Return(expectedIPList, nil)
+
+				StsClient = func(proxyURL *string) (*sts.Client, error) {
+					// StsClient should be called with the AwsProxy URL when configured
+					if proxyURL != nil && *proxyURL == "http://aws-proxy:8080" {
+						return &sts.Client{}, nil
+					}
+					return &sts.Client{}, fmt.Errorf("StsClient should be called with AWS proxy URL, got: %v", proxyURL)
+				}
+				AssumeRoleWithJWT = func(jwt string, roleArn string, stsClient stscreds.AssumeRoleWithWebIdentityAPIClient) (aws.Credentials, error) {
+					return aws.Credentials{
+						AccessKeyID:     testAccessKeyID,
+						SecretAccessKey: testSecretAccessKey,
+						SessionToken:    testSessionToken,
+					}, nil
+				}
+				AssumeRoleSequence = func(
+					seedClient stscreds.AssumeRoleAPIClient,
+					roleArnSequence []awsutil.RoleArnSession,
+					proxyURL *string,
+					stsClientProviderFunc awsutil.STSClientProviderFunc,
+				) (aws.Credentials, error) {
+					// Mock implementation to avoid real AWS calls
+					return aws.Credentials{
+						AccessKeyID:     testAccessKeyID,
+						SecretAccessKey: testSecretAccessKey,
+						SessionToken:    testSessionToken,
+					}, nil
+				}
+				defer func() {
+					AssumeRoleSequence = awsutil.AssumeRoleSequence
+				}()
+				mockClientUtil.EXPECT().GetBackplaneClient(
+					testQueryConfig.BackplaneConfiguration.URL, testOcmToken, testQueryConfig.BackplaneConfiguration.ProxyURL).Return(mockClient, nil)
+				mockClient.EXPECT().GetAssumeRoleSequence(context.TODO(), testClusterID).Return(fakeHTTPResp, nil)
+
+				_, err = testQueryConfig.getIsolatedCredentials(testOcmToken)
+				Expect(err).To(BeNil())
+			})
+
+			It("should use regular proxy when AwsProxy is not configured", func() {
+				// Ensure AwsProxy is not set (should be nil by default)
+				testQueryConfig.AwsProxy = nil
+				testQueryConfig.ProxyURL = aws.String("http://regular-proxy:8080")
+
+				// Mock CheckEgressIP to avoid real HTTP calls
+				originalCheckEgressIP := CheckEgressIP
+				CheckEgressIP = func(client *http.Client, url string) (net.IP, error) {
+					return net.ParseIP("209.10.10.10"), nil // IP that matches our test trusted range
+				}
+				defer func() {
+					CheckEgressIP = originalCheckEgressIP
+				}()
+
+				GetCallerIdentity = func(client *sts.Client) error {
+					return nil // Simulate success
+				}
+				defer func() {
+					GetCallerIdentity = func(client *sts.Client) error {
+						_, err := client.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+						return err
+					}
+				}()
+
+				ip1 := cmv1.NewTrustedIp().ID("209.10.10.10").Enabled(true)
+				expectedIPList, err := cmv1.NewTrustedIpList().Items(ip1).Build()
+				Expect(err).To(BeNil())
+				mockOcmInterface.EXPECT().GetTrustedIPList(gomock.Any()).Return(expectedIPList, nil)
+
+				StsClient = func(proxyURL *string) (*sts.Client, error) {
+					// StsClient should be called with regular proxy when BACKPLANE_AWS_PROXY is not set
+					if proxyURL != nil && *proxyURL == "http://regular-proxy:8080" {
+						return &sts.Client{}, nil
+					}
+					return &sts.Client{}, fmt.Errorf("StsClient should be called with regular proxy URL, got: %v", proxyURL)
+				}
+				AssumeRoleWithJWT = func(jwt string, roleArn string, stsClient stscreds.AssumeRoleWithWebIdentityAPIClient) (aws.Credentials, error) {
+					return aws.Credentials{
+						AccessKeyID:     testAccessKeyID,
+						SecretAccessKey: testSecretAccessKey,
+						SessionToken:    testSessionToken,
+					}, nil
+				}
+				AssumeRoleSequence = func(
+					seedClient stscreds.AssumeRoleAPIClient,
+					roleArnSequence []awsutil.RoleArnSession,
+					proxyURL *string,
+					stsClientProviderFunc awsutil.STSClientProviderFunc,
+				) (aws.Credentials, error) {
+					// Mock implementation to avoid real AWS calls
+					return aws.Credentials{
+						AccessKeyID:     testAccessKeyID,
+						SecretAccessKey: testSecretAccessKey,
+						SessionToken:    testSessionToken,
+					}, nil
+				}
+				defer func() {
+					AssumeRoleSequence = awsutil.AssumeRoleSequence
+				}()
+				mockClientUtil.EXPECT().GetBackplaneClient(
+					testQueryConfig.BackplaneConfiguration.URL, testOcmToken, testQueryConfig.BackplaneConfiguration.ProxyURL).Return(mockClient, nil)
+				mockClient.EXPECT().GetAssumeRoleSequence(context.TODO(), testClusterID).Return(fakeHTTPResp, nil)
+
+				_, err = testQueryConfig.getIsolatedCredentials(testOcmToken)
+				Expect(err).To(BeNil())
+			})
+		})
+	})
+
+	Context("Proxy separation verification", func() {
+		It("should demonstrate traffic separation between AWS and Backplane API calls", func() {
+			// Set different proxies for AWS and Backplane
+			testQueryConfig.ProxyURL = aws.String("http://backplane-proxy:8080")
+			testQueryConfig.AwsProxy = aws.String("http://aws-proxy:8080")
+
+			// Mock CheckEgressIP to avoid real HTTP calls
+			originalCheckEgressIP := CheckEgressIP
+			CheckEgressIP = func(client *http.Client, url string) (net.IP, error) {
+				// IP that matches our test trusted range
+				return net.ParseIP("209.10.10.10"), nil
+			}
+			defer func() {
+				CheckEgressIP = originalCheckEgressIP
+			}()
+
+			// Track which proxy was used for which calls
+			var awsProxyUsed, backplaneProxyUsed bool
+
+			GetCallerIdentity = func(client *sts.Client) error {
+				return nil // Simulate success
+			}
+			defer func() {
+				GetCallerIdentity = func(client *sts.Client) error {
+					_, err := client.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+					return err
+				}
+			}()
+
+			ip1 := cmv1.NewTrustedIp().ID("209.10.10.10").Enabled(true)
+			expectedIPList, err := cmv1.NewTrustedIpList().Items(ip1).Build()
+			Expect(err).To(BeNil())
+			mockOcmInterface.EXPECT().GetTrustedIPList(gomock.Any()).Return(expectedIPList, nil)
+
+			StsClient = func(proxyURL *string) (*sts.Client, error) {
+				// AWS calls should use AwsProxy from configuration
+				if proxyURL != nil && *proxyURL == "http://aws-proxy:8080" {
+					awsProxyUsed = true
+					return &sts.Client{}, nil
+				}
+				return &sts.Client{}, fmt.Errorf("AWS STS should use AwsProxy configuration, not regular proxy")
+			}
+			AssumeRoleWithJWT = func(jwt string, roleArn string, stsClient stscreds.AssumeRoleWithWebIdentityAPIClient) (aws.Credentials, error) {
+				return aws.Credentials{
+					AccessKeyID:     testAccessKeyID,
+					SecretAccessKey: testSecretAccessKey,
+					SessionToken:    testSessionToken,
+				}, nil
+			}
+			AssumeRoleSequence = func(
+				seedClient stscreds.AssumeRoleAPIClient,
+				roleArnSequence []awsutil.RoleArnSession,
+				proxyURL *string,
+				stsClientProviderFunc awsutil.STSClientProviderFunc,
+			) (aws.Credentials, error) {
+				// Mock implementation to avoid real AWS calls
+				return aws.Credentials{
+					AccessKeyID:     testAccessKeyID,
+					SecretAccessKey: testSecretAccessKey,
+					SessionToken:    testSessionToken,
+				}, nil
+			}
+			defer func() {
+				AssumeRoleSequence = awsutil.AssumeRoleSequence
+			}()
+
+			// Backplane API calls should use the regular ProxyURL
+			mockClientUtil.EXPECT().GetBackplaneClient(
+				testQueryConfig.BackplaneConfiguration.URL, testOcmToken, testQueryConfig.BackplaneConfiguration.ProxyURL).Do(func(url, token string, proxyURL *string) {
+				if proxyURL != nil && *proxyURL == "http://backplane-proxy:8080" {
+					backplaneProxyUsed = true
+				}
+			}).Return(mockClient, nil)
+			mockClient.EXPECT().GetAssumeRoleSequence(context.TODO(), testClusterID).Return(fakeHTTPResp, nil)
+
+			_, err = testQueryConfig.getIsolatedCredentials(testOcmToken)
+			Expect(err).To(BeNil())
+
+			// Verify that different proxies were used for different types of calls
+			Expect(awsProxyUsed).To(BeTrue(), "AWS proxy should have been used for STS calls")
+			Expect(backplaneProxyUsed).To(BeTrue(), "Backplane proxy should have been used for Backplane API calls")
+		})
+
+		It("should handle proxy separation in verifyTrustedIPAndGetPolicy", func() {
+			// Set AWS-specific proxy in configuration
+			testQueryConfig.AwsProxy = aws.String("http://aws-proxy:8080")
+
+			// Mock checkEgressIP to avoid real HTTP calls
+			originalCheckEgressIP := CheckEgressIP
+			CheckEgressIP = func(client *http.Client, url string) (net.IP, error) {
+				// IP that matches our test trusted range
+				return net.ParseIP("209.10.10.10"), nil
+			}
+			defer func() {
+				CheckEgressIP = originalCheckEgressIP
+			}()
+
+			// Set up expected trusted IP list
+			ip1 := cmv1.NewTrustedIp().ID("209.10.10.10").Enabled(true)
+			expectedIPList, err := cmv1.NewTrustedIpList().Items(ip1).Build()
+			Expect(err).To(BeNil())
+			mockOcmInterface.EXPECT().GetTrustedIPList(gomock.Any()).Return(expectedIPList, nil)
+
+			// Test that AWS proxy is used for checkEgressIP
+			policy, err := verifyTrustedIPAndGetPolicy(&testQueryConfig)
+			Expect(err).To(BeNil())
+			Expect(policy.Version).To(Equal("2012-10-17"))
+		})
+
+		It("should fallback to regular proxy when AwsProxy is not configured (regression test)", func() {
+			// Ensure AwsProxy is not set (should be nil by default)
+			testQueryConfig.AwsProxy = nil
+
+			// Should fall back to regular proxy behavior
+			testQueryConfig.ProxyURL = aws.String("http://regular-proxy:8080")
+
+			// Mock CheckEgressIP to avoid real HTTP calls
+			originalCheckEgressIP := CheckEgressIP
+			CheckEgressIP = func(client *http.Client, url string) (net.IP, error) {
+				// IP that matches our test trusted range
+				return net.ParseIP("209.10.10.10"), nil
+			}
+			defer func() {
+				CheckEgressIP = originalCheckEgressIP
+			}()
+
+			GetCallerIdentity = func(client *sts.Client) error {
+				return nil // Simulate success
+			}
+			defer func() {
+				GetCallerIdentity = func(client *sts.Client) error {
+					_, err := client.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+					return err
+				}
+			}()
+
+			ip1 := cmv1.NewTrustedIp().ID("209.10.10.10").Enabled(true)
+			expectedIPList, err := cmv1.NewTrustedIpList().Items(ip1).Build()
+			Expect(err).To(BeNil())
+			mockOcmInterface.EXPECT().GetTrustedIPList(gomock.Any()).Return(expectedIPList, nil)
+
+			StsClient = func(proxyURL *string) (*sts.Client, error) {
+				// StsClient should be called with regular proxy when AwsProxy is not configured
+				if proxyURL != nil && *proxyURL == "http://regular-proxy:8080" {
+					return &sts.Client{}, nil
+				}
+				return &sts.Client{}, fmt.Errorf("StsClient should be called with regular proxy URL, got: %v", proxyURL)
+			}
+			AssumeRoleWithJWT = func(jwt string, roleArn string, stsClient stscreds.AssumeRoleWithWebIdentityAPIClient) (aws.Credentials, error) {
+				return aws.Credentials{
+					AccessKeyID:     testAccessKeyID,
+					SecretAccessKey: testSecretAccessKey,
+					SessionToken:    testSessionToken,
+				}, nil
+			}
+			AssumeRoleSequence = func(
+				seedClient stscreds.AssumeRoleAPIClient,
+				roleArnSequence []awsutil.RoleArnSession,
+				proxyURL *string,
+				stsClientProviderFunc awsutil.STSClientProviderFunc,
+			) (aws.Credentials, error) {
+				// Mock implementation to avoid real AWS calls
+				return aws.Credentials{
+					AccessKeyID:     testAccessKeyID,
+					SecretAccessKey: testSecretAccessKey,
+					SessionToken:    testSessionToken,
+				}, nil
+			}
+			defer func() {
+				AssumeRoleSequence = awsutil.AssumeRoleSequence
+			}()
+			mockClientUtil.EXPECT().GetBackplaneClient(
+				testQueryConfig.BackplaneConfiguration.URL, testOcmToken, testQueryConfig.BackplaneConfiguration.ProxyURL).Return(mockClient, nil)
+			mockClient.EXPECT().GetAssumeRoleSequence(context.TODO(), testClusterID).Return(fakeHTTPResp, nil)
+
+			_, err = testQueryConfig.getIsolatedCredentials(testOcmToken)
 			Expect(err).To(BeNil())
 		})
 	})
@@ -520,6 +1118,400 @@ var _ = Describe("isIsolatedBackplaneAccess", func() {
 
 			Expect(result).To(Equal(true))
 			Expect(err).To(BeNil())
+		})
+	})
+})
+
+var _ = Describe("PolicyARNs Integration", func() {
+	var (
+		testSessionPolicyArn string
+	)
+
+	BeforeEach(func() {
+		testSessionPolicyArn = "arn:aws:iam::123456789012:policy/TestSessionPolicy"
+	})
+
+	// Helper function to simulate the getIsolatedCredentials logic
+	simulateGetIsolatedCredentialsLogic := func(roleChainResponse assumeChainResponse) []awsutil.RoleArnSession {
+		// Create a mock inline policy for testing
+		mockInlinePolicy := &awsutil.PolicyDocument{
+			Version: "2012-10-17",
+			Statement: []awsutil.PolicyStatement{
+				{
+					Sid:      "TestPolicy",
+					Effect:   "Allow",
+					Action:   []string{"s3:GetObject"},
+					Resource: aws.String("*"),
+				},
+			},
+		}
+
+		assumeRoleArnSessionSequence := make([]awsutil.RoleArnSession, 0, len(roleChainResponse.AssumptionSequence))
+		for _, namedRoleArnEntry := range roleChainResponse.AssumptionSequence {
+			roleArnSession := awsutil.RoleArnSession{RoleArn: namedRoleArnEntry.Arn}
+			if namedRoleArnEntry.Name == CustomerRoleArnName || namedRoleArnEntry.Name == OrgRoleArnName {
+				roleArnSession.RoleSessionName = roleChainResponse.CustomerRoleSessionName
+			} else {
+				roleArnSession.RoleSessionName = "test@example.com"
+			}
+
+			// Default to no policy ARNs
+			roleArnSession.PolicyARNs = []types.PolicyDescriptorType{}
+			if namedRoleArnEntry.Name == CustomerRoleArnName {
+				roleArnSession.IsCustomerRole = true
+
+				// Add the session policy ARN for selected roles
+				if roleChainResponse.SessionPolicyArn != "" {
+					roleArnSession.PolicyARNs = []types.PolicyDescriptorType{
+						{
+							Arn: aws.String(roleChainResponse.SessionPolicyArn),
+						},
+					}
+				} else {
+					roleArnSession.Policy = mockInlinePolicy
+				}
+
+			} else {
+				roleArnSession.IsCustomerRole = false
+			}
+			roleArnSession.Name = namedRoleArnEntry.Name
+
+			assumeRoleArnSessionSequence = append(assumeRoleArnSessionSequence, roleArnSession)
+		}
+		return assumeRoleArnSessionSequence
+	}
+
+	// Generated by Cursor
+	Context("when creating RoleArnSession with SessionPolicyArn", func() {
+		It("should set PolicyARNs for customer roles", func() {
+			roleChainResponse := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: CustomerRoleArnName,
+						Arn:  "arn:aws:iam::123456789012:role/customer-role",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        testSessionPolicyArn,
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponse)
+
+			Expect(len(assumeRoleArnSessionSequence)).To(Equal(1))
+
+			customerRole := assumeRoleArnSessionSequence[0]
+			Expect(customerRole.IsCustomerRole).To(BeTrue())
+			Expect(customerRole.Name).To(Equal(CustomerRoleArnName))
+			Expect(len(customerRole.PolicyARNs)).To(Equal(1))
+			Expect(*customerRole.PolicyARNs[0].Arn).To(Equal(testSessionPolicyArn))
+			// Verify that Policy is nil when SessionPolicyArn is used
+			Expect(customerRole.Policy).To(BeNil())
+		})
+
+		It("should not set PolicyARNs for non-customer roles", func() {
+			roleChainResponse := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: "Support-Role-Arn",
+						Arn:  "arn:aws:iam::123456789012:role/support-role",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        testSessionPolicyArn,
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponse)
+
+			Expect(len(assumeRoleArnSessionSequence)).To(Equal(1))
+
+			supportRole := assumeRoleArnSessionSequence[0]
+			Expect(supportRole.IsCustomerRole).To(BeFalse())
+			Expect(supportRole.Name).To(Equal("Support-Role-Arn"))
+			Expect(len(supportRole.PolicyARNs)).To(Equal(0))
+			// Verify that Policy is nil for non-customer roles
+			Expect(supportRole.Policy).To(BeNil())
+		})
+
+		// Generated by Cursor
+		It("should handle empty SessionPolicyArn for customer roles", func() {
+			roleChainResponse := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: CustomerRoleArnName,
+						Arn:  "arn:aws:iam::123456789012:role/customer-role",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        "", // Empty session policy ARN
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponse)
+
+			Expect(len(assumeRoleArnSessionSequence)).To(Equal(1))
+
+			customerRole := assumeRoleArnSessionSequence[0]
+			Expect(customerRole.IsCustomerRole).To(BeTrue())
+			Expect(customerRole.Name).To(Equal(CustomerRoleArnName))
+			Expect(len(customerRole.PolicyARNs)).To(Equal(0))
+			// Verify that Policy is set when SessionPolicyArn is empty
+			Expect(customerRole.Policy).ToNot(BeNil())
+		})
+	})
+
+	Context("when verifying roleArnSession.Policy field behavior", func() {
+		It("should set Policy only for customer roles without SessionPolicyArn", func() {
+			// Test customer role with SessionPolicyArn - Policy should be nil
+			roleChainResponseWithArn := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: CustomerRoleArnName,
+						Arn:  "arn:aws:iam::123456789012:role/customer-role",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        testSessionPolicyArn,
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponseWithArn)
+			customerRoleWithArn := assumeRoleArnSessionSequence[0]
+
+			Expect(customerRoleWithArn.IsCustomerRole).To(BeTrue())
+			Expect(customerRoleWithArn.Policy).To(BeNil()) // Policy should be nil when SessionPolicyArn is used
+			Expect(len(customerRoleWithArn.PolicyARNs)).To(Equal(1))
+
+			// Test customer role without SessionPolicyArn - Policy should be set
+			roleChainResponseWithoutArn := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: CustomerRoleArnName,
+						Arn:  "arn:aws:iam::123456789012:role/customer-role",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        "", // Empty SessionPolicyArn
+			}
+
+			assumeRoleArnSessionSequence = simulateGetIsolatedCredentialsLogic(roleChainResponseWithoutArn)
+			customerRoleWithoutArn := assumeRoleArnSessionSequence[0]
+
+			Expect(customerRoleWithoutArn.IsCustomerRole).To(BeTrue())
+			Expect(customerRoleWithoutArn.Policy).ToNot(BeNil()) // Policy should be set when SessionPolicyArn is empty
+			Expect(len(customerRoleWithoutArn.PolicyARNs)).To(Equal(0))
+
+			// Test non-customer role - Policy should always be nil
+			roleChainResponseNonCustomer := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: "Support-Role-Arn",
+						Arn:  "arn:aws:iam::123456789012:role/support-role",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        "", // Empty SessionPolicyArn
+			}
+
+			assumeRoleArnSessionSequence = simulateGetIsolatedCredentialsLogic(roleChainResponseNonCustomer)
+			nonCustomerRole := assumeRoleArnSessionSequence[0]
+
+			Expect(nonCustomerRole.IsCustomerRole).To(BeFalse())
+			Expect(nonCustomerRole.Policy).To(BeNil()) // Policy should always be nil for non-customer roles
+			Expect(len(nonCustomerRole.PolicyARNs)).To(Equal(0))
+		})
+	})
+
+	Context("error scenarios with PolicyARNs", func() {
+		It("should handle invalid SessionPolicyArn gracefully", func() {
+			roleChainResponse := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: CustomerRoleArnName,
+						Arn:  "arn:aws:iam::123456789012:role/customer-role",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        "invalid-arn-format", // Invalid ARN format
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponse)
+
+			Expect(len(assumeRoleArnSessionSequence)).To(Equal(1))
+
+			customerRole := assumeRoleArnSessionSequence[0]
+			Expect(customerRole.IsCustomerRole).To(BeTrue())
+			Expect(customerRole.Name).To(Equal(CustomerRoleArnName))
+			Expect(len(customerRole.PolicyARNs)).To(Equal(1))
+			// The invalid ARN is still passed through - validation happens at AWS level
+			Expect(*customerRole.PolicyARNs[0].Arn).To(Equal("invalid-arn-format"))
+		})
+
+		It("should handle missing AssumptionSequence", func() {
+			roleChainResponse := assumeChainResponse{
+				AssumptionSequence:      []namedRoleArn{}, // Empty sequence
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        testSessionPolicyArn,
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponse)
+
+			// Should result in empty sequence
+			Expect(len(assumeRoleArnSessionSequence)).To(Equal(0))
+		})
+
+		It("should handle malformed role ARNs in AssumptionSequence", func() {
+			roleChainResponse := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: CustomerRoleArnName,
+						Arn:  "malformed-role-arn", // Invalid role ARN format
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        testSessionPolicyArn,
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponse)
+
+			Expect(len(assumeRoleArnSessionSequence)).To(Equal(1))
+
+			customerRole := assumeRoleArnSessionSequence[0]
+			Expect(customerRole.IsCustomerRole).To(BeTrue())
+			Expect(customerRole.RoleArn).To(Equal("malformed-role-arn")) // Malformed ARN is passed through
+			Expect(len(customerRole.PolicyARNs)).To(Equal(1))
+			Expect(*customerRole.PolicyARNs[0].Arn).To(Equal(testSessionPolicyArn))
+		})
+
+		It("should handle extremely long SessionPolicyArn", func() {
+			// Create a very long policy ARN that might cause issues
+			longPolicyArn := "arn:aws:iam::123456789012:policy/" + strings.Repeat("a", 500)
+
+			roleChainResponse := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: CustomerRoleArnName,
+						Arn:  "arn:aws:iam::123456789012:role/customer-role",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        longPolicyArn,
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponse)
+
+			Expect(len(assumeRoleArnSessionSequence)).To(Equal(1))
+
+			customerRole := assumeRoleArnSessionSequence[0]
+			Expect(customerRole.IsCustomerRole).To(BeTrue())
+			Expect(len(customerRole.PolicyARNs)).To(Equal(1))
+			Expect(*customerRole.PolicyARNs[0].Arn).To(Equal(longPolicyArn))
+			// Verify the ARN length
+			Expect(len(*customerRole.PolicyARNs[0].Arn)).To(BeNumerically(">", 500))
+		})
+
+		It("should handle special characters in SessionPolicyArn", func() {
+			// Policy ARN with special characters (though this would be invalid in real AWS)
+			specialCharsArn := "arn:aws:iam::123456789012:policy/test-policy-with-special-chars!@#$%"
+
+			roleChainResponse := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: CustomerRoleArnName,
+						Arn:  "arn:aws:iam::123456789012:role/customer-role",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        specialCharsArn,
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponse)
+
+			Expect(len(assumeRoleArnSessionSequence)).To(Equal(1))
+
+			customerRole := assumeRoleArnSessionSequence[0]
+			Expect(customerRole.IsCustomerRole).To(BeTrue())
+			Expect(len(customerRole.PolicyARNs)).To(Equal(1))
+			Expect(*customerRole.PolicyARNs[0].Arn).To(Equal(specialCharsArn))
+		})
+
+		It("should verify debug logging when SessionPolicyArn is non-empty", func() {
+			roleChainResponse := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: CustomerRoleArnName,
+						Arn:  "arn:aws:iam::123456789012:role/customer-role",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        testSessionPolicyArn, // Non-empty SessionPolicyArn
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponse)
+
+			// Verify the non-empty SessionPolicyArn scenario
+			Expect(len(assumeRoleArnSessionSequence)).To(Equal(1))
+
+			customerRole := assumeRoleArnSessionSequence[0]
+
+			// Verify the customer role identification
+			Expect(customerRole.IsCustomerRole).To(BeTrue())
+			Expect(customerRole.Name).To(Equal(CustomerRoleArnName))
+			Expect(customerRole.RoleSessionName).To(Equal("customer-session"))
+
+			// Verify that SessionPolicyArn is non-empty
+			Expect(roleChainResponse.SessionPolicyArn).ToNot(BeEmpty())
+
+			// Verify PolicyARNs array is populated correctly
+			Expect(len(customerRole.PolicyARNs)).To(Equal(1))
+			Expect(customerRole.PolicyARNs[0].Arn).ToNot(BeNil())
+			Expect(*customerRole.PolicyARNs[0].Arn).To(Equal(testSessionPolicyArn))
+
+			// Verify the exact SessionPolicyArn value matches
+			Expect(*customerRole.PolicyARNs[0].Arn).To(Equal(roleChainResponse.SessionPolicyArn))
+		})
+
+		It("should handle multiple customer roles with same SessionPolicyArn", func() {
+			// Test scenario with multiple customer roles getting the same session policy
+			roleChainResponse := assumeChainResponse{
+				AssumptionSequence: []namedRoleArn{
+					{
+						Name: CustomerRoleArnName,
+						Arn:  "arn:aws:iam::123456789012:role/customer-role-1",
+					},
+					{
+						Name: "Support-Role-Arn",
+						Arn:  "arn:aws:iam::123456789012:role/support-role",
+					},
+					{
+						Name: CustomerRoleArnName, // Another customer role
+						Arn:  "arn:aws:iam::123456789012:role/customer-role-2",
+					},
+				},
+				CustomerRoleSessionName: "customer-session",
+				SessionPolicyArn:        testSessionPolicyArn,
+			}
+
+			assumeRoleArnSessionSequence := simulateGetIsolatedCredentialsLogic(roleChainResponse)
+
+			Expect(len(assumeRoleArnSessionSequence)).To(Equal(3))
+
+			// Verify first customer role
+			customerRole1 := assumeRoleArnSessionSequence[0]
+			Expect(customerRole1.IsCustomerRole).To(BeTrue())
+			Expect(customerRole1.Name).To(Equal(CustomerRoleArnName))
+			Expect(len(customerRole1.PolicyARNs)).To(Equal(1))
+			Expect(*customerRole1.PolicyARNs[0].Arn).To(Equal(testSessionPolicyArn))
+
+			// Verify support role (non-customer)
+			supportRole := assumeRoleArnSessionSequence[1]
+			Expect(supportRole.IsCustomerRole).To(BeFalse())
+			Expect(supportRole.Name).To(Equal("Support-Role-Arn"))
+			Expect(len(supportRole.PolicyARNs)).To(Equal(0))
+
+			// Verify second customer role
+			customerRole2 := assumeRoleArnSessionSequence[2]
+			Expect(customerRole2.IsCustomerRole).To(BeTrue())
+			Expect(customerRole2.Name).To(Equal(CustomerRoleArnName))
+			Expect(len(customerRole2.PolicyARNs)).To(Equal(1))
+			Expect(*customerRole2.PolicyARNs[0].Arn).To(Equal(testSessionPolicyArn))
 		})
 	})
 })

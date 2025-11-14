@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"path"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/cobra"
@@ -118,12 +118,12 @@ var _ = Describe("testJob create command", func() {
 			StatusCode: http.StatusOK,
 		}
 		fakeResp.Header.Add("Content-Type", "json")
-		os.Setenv(info.BackplaneURLEnvName, proxyURI)
+		_ = os.Setenv(info.BackplaneURLEnvName, proxyURI)
 		ocmEnv, _ = cmv1.NewEnvironment().BackplaneURL("https://dummy.api").Build()
 	})
 
 	AfterEach(func() {
-		os.Setenv(info.BackplaneURLEnvName, "")
+		_ = os.Setenv(info.BackplaneURLEnvName, "")
 		_ = os.RemoveAll(tempDir)
 		// Clear kube config file
 		utils.RemoveTempKubeConfig()
@@ -187,7 +187,7 @@ var _ = Describe("testJob create command", func() {
 			sourceDir, _ = os.MkdirTemp("", "manualScriptDir")
 			_ = os.WriteFile(path.Join(sourceDir, "metadata.yaml"), []byte(MetadataYaml), 0600)
 			_ = os.WriteFile(path.Join(sourceDir, "script.sh"), []byte("echo hello"), 0600)
-			defer os.RemoveAll(sourceDir)
+			defer func() { _ = os.RemoveAll(sourceDir) }()
 
 			_ = os.Chdir(workingDir)
 
@@ -224,7 +224,7 @@ var _ = Describe("testJob create command", func() {
 		})
 
 		It("Should able use the current logged in cluster if non specified and retrieve from config file", func() {
-			os.Setenv(info.BackplaneURLEnvName, "https://api-backplane.apps.something.com")
+			_ = os.Setenv(info.BackplaneURLEnvName, "https://api-backplane.apps.something.com")
 			mockOcmInterface.EXPECT().GetOCMEnvironment().Return(ocmEnv, nil).AnyTimes()
 			mockOcmInterface.EXPECT().IsProduction().Return(false, nil)
 			err := utils.CreateTempKubeConfig(nil)
@@ -339,10 +339,10 @@ echo_touch "Hello"
 }
 `, tempDir)
 
-			GetGitRepoPath = exec.Command("echo", tempDir)
+			GetGitRepoPath = exec.Command("echo", tempDir) //nolint:gosec
 			// tmp/createJobTest3397561583
 			_ = os.WriteFile(path.Join(tempDir, "script.sh"), []byte(script), 0600)
-			_ = os.Mkdir(path.Join(tempDir, "scripts"), 0755)
+			_ = os.Mkdir(path.Join(tempDir, "scripts"), 0755) //nolint:gosec
 			_ = os.WriteFile(path.Join(tempDir, "scripts", "lib.sh"), []byte(lib), 0600)
 			mockOcmInterface.EXPECT().GetOCMEnvironment().Return(ocmEnv, nil).AnyTimes()
 			mockOcmInterface.EXPECT().IsProduction().Return(false, nil)
@@ -358,5 +358,162 @@ echo_touch "Hello"
 
 			Expect(err).To(BeNil())
 		})
+
+		It("should fail if a required script parameter is missing", func() {
+			// Add a required env to metadata
+			newMetadata := `
+file: script.sh
+name: example
+description: just an example
+author: dude
+allowedGroups:
+  - SREP
+envs:
+  - key: REQUIRED_VAR
+    description: "A required parameter"
+    optional: false
+rbac:
+    roles:
+      - namespace: "kube-system"
+        rules:
+          - verbs:
+            - "*"
+            apiGroups:
+            - ""
+            resources:
+            - "*"
+            resourceNames:
+            - "*"
+    clusterRoleRules:
+        - verbs:
+            - "*"
+          apiGroups:
+            - ""
+          resources:
+            - "*"
+          resourceNames:
+            - "*"
+language: bash
+`
+			_ = os.WriteFile(path.Join(tempDir, "metadata.yaml"), []byte(newMetadata), 0600)
+
+			mockOcmInterface.EXPECT().GetOCMEnvironment().Return(ocmEnv, nil).AnyTimes()
+			mockOcmInterface.EXPECT().IsProduction().Return(false, nil)
+			mockOcmInterface.EXPECT().GetTargetCluster(testClusterID).Return(trueClusterID, testClusterID, nil)
+			mockOcmInterface.EXPECT().IsClusterHibernating(gomock.Eq(trueClusterID)).Return(false, nil).AnyTimes()
+			mockOcmInterface.EXPECT().GetOCMAccessToken().Return(&testToken, nil).AnyTimes()
+			mockClientUtil.EXPECT().MakeRawBackplaneAPIClient(proxyURI).Return(mockClient, nil)
+
+			sut.SetArgs([]string{"create", "--cluster-id", testClusterID})
+			err := sut.Execute()
+
+			Expect(err).ToNot(BeNil())
+			Expect(err.Error()).To(ContainSubstring("missing required parameter"))
+		})
+
+		It("should fail the parameter validation if an invalid parameter is provided", func() {
+			// Add an optional env to metadata
+			newMetadata := `
+file: script.sh
+name: example
+description: just an example
+author: dude
+allowedGroups:
+  - SREP
+envs:
+  - key: SOME_VAR
+    description: "Some parameter"
+    optional: true
+rbac:
+    roles:
+      - namespace: "kube-system"
+        rules:
+          - verbs:
+            - "*"
+            apiGroups:
+            - ""
+            resources:
+            - "*"
+            resourceNames:
+            - "*"
+    clusterRoleRules:
+        - verbs:
+            - "*"
+          apiGroups:
+            - ""
+          resources:
+            - "*"
+          resourceNames:
+            - "*"
+language: bash
+`
+			_ = os.WriteFile(path.Join(tempDir, "metadata.yaml"), []byte(newMetadata), 0600)
+
+			mockOcmInterface.EXPECT().GetOCMEnvironment().Return(ocmEnv, nil).AnyTimes()
+			mockOcmInterface.EXPECT().IsProduction().Return(false, nil)
+			mockOcmInterface.EXPECT().GetTargetCluster(testClusterID).Return(trueClusterID, testClusterID, nil)
+			mockOcmInterface.EXPECT().IsClusterHibernating(gomock.Eq(trueClusterID)).Return(false, nil).AnyTimes()
+			mockOcmInterface.EXPECT().GetOCMAccessToken().Return(&testToken, nil).AnyTimes()
+			mockClientUtil.EXPECT().MakeRawBackplaneAPIClient(proxyURI).Return(mockClient, nil)
+
+			sut.SetArgs([]string{"create", "--cluster-id", testClusterID, "-p", "INVALID_ENV=123"})
+			err := sut.Execute()
+
+			Expect(err).ToNot(BeNil())
+			Expect(err.Error()).To(ContainSubstring("invalid parameter"))
+		})
+
+		It("should pass parameter validation if all parameters entered are valid", func() {
+			// Add an optional env to metadata
+			newMetadata := `
+file: script.sh
+name: example
+description: just an example
+author: dude
+allowedGroups:
+  - SREP
+envs:
+  - key: VALID_PARAMETER
+    description: "A valid parameter"
+    optional: true
+rbac:
+    roles:
+      - namespace: "kube-system"
+        rules:
+          - verbs:
+            - "*"
+            apiGroups:
+            - ""
+            resources:
+            - "*"
+            resourceNames:
+            - "*"
+    clusterRoleRules:
+        - verbs:
+            - "*"
+          apiGroups:
+            - ""
+          resources:
+            - "*"
+          resourceNames:
+            - "*"
+language: bash
+`
+			_ = os.WriteFile(path.Join(tempDir, "metadata.yaml"), []byte(newMetadata), 0600)
+
+			mockOcmInterface.EXPECT().GetOCMEnvironment().Return(ocmEnv, nil).AnyTimes()
+			mockOcmInterface.EXPECT().IsProduction().Return(false, nil)
+			mockOcmInterface.EXPECT().GetTargetCluster(testClusterID).Return(trueClusterID, testClusterID, nil)
+			mockOcmInterface.EXPECT().IsClusterHibernating(gomock.Eq(trueClusterID)).Return(false, nil).AnyTimes()
+			mockOcmInterface.EXPECT().GetOCMAccessToken().Return(&testToken, nil).AnyTimes()
+			mockClientUtil.EXPECT().MakeRawBackplaneAPIClient(proxyURI).Return(mockClient, nil)
+			mockClient.EXPECT().CreateTestScriptRun(gomock.Any(), trueClusterID, gomock.Any()).Return(fakeResp, nil)
+
+			sut.SetArgs([]string{"create", "--cluster-id", testClusterID, "-p", "VALID_PARAMETER=abc"})
+			err := sut.Execute()
+
+			Expect(err).To(BeNil())
+		})
+
 	})
 })

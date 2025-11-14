@@ -11,7 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	cmv1 "github.com/openshift-online/ocm-sdk-go/clustersmgmt/v1"
@@ -192,9 +192,9 @@ var _ = Describe("SSM command", func() {
 		AfterEach(func() {
 			ExecCommand = originalExecCommand
 			ssmArgs.node = ""
-			os.Unsetenv("AWS_ACCESS_KEY_ID")
-			os.Unsetenv("AWS_SECRET_ACCESS_KEY")
-			os.Unsetenv("AWS_SESSION_TOKEN")
+			_ = os.Unsetenv("AWS_ACCESS_KEY_ID")
+			_ = os.Unsetenv("AWS_SECRET_ACCESS_KEY")
+			_ = os.Unsetenv("AWS_SESSION_TOKEN")
 		})
 
 		Context("startSSMsession", func() {

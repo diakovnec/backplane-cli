@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/cobra"
@@ -116,13 +116,13 @@ var _ = Describe("Logout command", func() {
 			CurrentContext: "default/myopenshiftcluster/example.openshift",
 		}
 
-		os.Setenv(info.BackplaneURLEnvName, backplaneAPIURI)
+		_ = os.Setenv(info.BackplaneURLEnvName, backplaneAPIURI)
 		ocmEnv, _ = cmv1.NewEnvironment().BackplaneURL("https://dummy.api").Build()
 	})
 
 	AfterEach(func() {
 		utils.RemoveTempKubeConfig()
-		os.Setenv(info.BackplaneURLEnvName, "")
+		_ = os.Setenv(info.BackplaneURLEnvName, "")
 		mockCtrl.Finish()
 	})
 

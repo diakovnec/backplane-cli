@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 	"github.com/openshift/backplane-cli/pkg/utils"
 )
 
@@ -97,11 +98,15 @@ func AssumeRole(
 	roleSessionName string,
 	roleArn string,
 	inlinePolicy *PolicyDocument,
+	policyARNs []types.PolicyDescriptorType,
 ) (aws.Credentials, error) {
 	assumeRoleProvider := stscreds.NewAssumeRoleProvider(stsClient, roleArn, func(options *stscreds.AssumeRoleOptions) {
 		options.RoleSessionName = roleSessionName
 		if inlinePolicy != nil {
 			options.Policy = aws.String(inlinePolicy.String())
+		}
+		if len(policyARNs) > 0 {
+			options.PolicyARNs = policyARNs
 		}
 	})
 	result, err := assumeRoleProvider.Retrieve(context.TODO())
@@ -123,8 +128,12 @@ var DefaultSTSClientProviderFunc STSClientProviderFunc = func(optnFns ...func(op
 }
 
 type RoleArnSession struct {
+	Name            string
 	RoleSessionName string
 	RoleArn         string
+	IsCustomerRole  bool
+	Policy          *PolicyDocument
+	PolicyARNs      []types.PolicyDescriptorType
 }
 
 func AssumeRoleSequence(
@@ -132,7 +141,6 @@ func AssumeRoleSequence(
 	roleArnSessionSequence []RoleArnSession,
 	proxyURL *string,
 	stsClientProviderFunc STSClientProviderFunc,
-	inlinePolicy *PolicyDocument,
 ) (aws.Credentials, error) {
 	if len(roleArnSessionSequence) == 0 {
 		return aws.Credentials{}, errors.New("role ARN sequence cannot be empty")
@@ -142,8 +150,14 @@ func AssumeRoleSequence(
 	var lastCredentials aws.Credentials
 
 	for i, roleArnSession := range roleArnSessionSequence {
-		logger.Debug("Assuming role in sequence: ", roleArnSession.RoleArn, " ", roleArnSession.RoleSessionName)
-		result, err := AssumeRole(nextClient, roleArnSession.RoleSessionName, roleArnSession.RoleArn, inlinePolicy)
+
+		logger.Debugf("Assuming role in sequence name:%s role:%s sessionName:%s isCustomerRole:%t",
+			roleArnSession.Name,
+			roleArnSession.RoleArn,
+			roleArnSession.RoleSessionName,
+			roleArnSession.IsCustomerRole,
+		)
+		result, err := AssumeRole(nextClient, roleArnSession.RoleSessionName, roleArnSession.RoleArn, roleArnSession.Policy, roleArnSession.PolicyARNs)
 		retryCount := 0
 		for err != nil {
 			// IAM policy updates can take a few seconds to resolve, and the sts.Client in AWS' Go SDK doesn't refresh itself on retries.
@@ -156,7 +170,10 @@ func AssumeRoleSequence(
 					return aws.Credentials{}, fmt.Errorf("failed to create client with credentials for role %v: %w", roleArnSession.RoleArn, err)
 				}
 
-				result, err = AssumeRole(nextClient, roleArnSession.RoleSessionName, roleArnSession.RoleArn, inlinePolicy)
+				result, err = AssumeRole(nextClient, roleArnSession.RoleSessionName, roleArnSession.RoleArn, roleArnSession.Policy, roleArnSession.PolicyARNs)
+				if err != nil {
+					logger.Debugf("failed to create client with credentials for role %s: name:%s %v", roleArnSession.RoleArn, roleArnSession.Name, err)
+				}
 				retryCount++
 			} else {
 				return aws.Credentials{}, fmt.Errorf("failed to assume role %v: %w", roleArnSession.RoleArn, err)
@@ -167,7 +184,7 @@ func AssumeRoleSequence(
 		if i < len(roleArnSessionSequence)-1 {
 			nextClient, err = createAssumeRoleSequenceClient(stsClientProviderFunc, lastCredentials, proxyURL)
 			if err != nil {
-				return aws.Credentials{}, fmt.Errorf("failed to create client with credentials for role %v: %w", roleArnSession.RoleArn, err)
+				return aws.Credentials{}, fmt.Errorf("failed to create client with credentials for role %v: name:%v %w", roleArnSession.RoleArn, roleArnSession.RoleSessionName, err)
 			}
 		}
 	}
@@ -227,7 +244,7 @@ func GetSigninToken(awsCredentials aws.Credentials, region string) (*AWSSigninTo
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to get signin token from %v, status code %d", baseFederationURL, res.StatusCode)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
+	ocmsdk "github.com/openshift-online/ocm-sdk-go"
 	"github.com/openshift/backplane-cli/pkg/info"
 	"github.com/openshift/backplane-cli/pkg/ocm"
 )
@@ -31,12 +32,12 @@ type AccessRequestsJiraConfiguration struct {
 	ProjectToTransitionsNames map[string]JiraTransitionsNamesForAccessRequests `json:"project-to-transitions-names"`
 }
 
-
 // BackplaneConfiguration represents the configuration for backplane-cli.
 // Note: Please update the validateConfig function if there are any required keys added.
 type BackplaneConfiguration struct {
 	URL                         string                          `json:"url"`
 	ProxyURL                    *string                         `json:"proxy-url"`
+	AwsProxy                    *string                         `json:"aws-proxy"`
 	SessionDirectory            string                          `json:"session-dir"`
 	AssumeInitialArn            string                          `json:"assume-initial-arn"`
 	ProdEnvName                 string                          `json:"prod-env-name"`
@@ -102,6 +103,12 @@ func GetConfigFilePath() (string, error) {
 
 // GetBackplaneConfiguration parses and returns the given backplane configuration
 func GetBackplaneConfiguration() (bpConfig BackplaneConfiguration, err error) {
+	return GetBackplaneConfigurationWithConn(nil)
+}
+
+// GetBackplaneConfiguration parses and returns the given backplane configuration using attributes
+// from provided OCM connection
+func GetBackplaneConfigurationWithConn(ocmConn *ocmsdk.Connection) (bpConfig BackplaneConfiguration, err error) {
 	viper.SetDefault(prodEnvNameKey, prodEnvNameDefaultValue)
 	viper.SetDefault(jiraBaseURLKey, JiraBaseURLDefaultValue)
 	viper.SetDefault(JiraConfigForAccessRequestsKey, JiraConfigForAccessRequestsDefaultValue)
@@ -137,24 +144,38 @@ func GetBackplaneConfiguration() (bpConfig BackplaneConfiguration, err error) {
 		if err != nil {
 			return bpConfig, err
 		}
+		// Check if user has explicitly defined AWS proxy
+		err = viper.BindEnv("aws-proxy", info.BackplaneAWSProxyEnvName)
+		if err != nil {
+			return bpConfig, err
+		}
 	} else {
 		logger.Debug("This is govcloud, no proxy to use")
 	}
-
 	// Warn user if url defined in the config file
 	if viper.GetString("url") != "" {
 		logger.Warn("Manual URL configuration is deprecated, please remove URL key from Backplane configuration")
 	}
-
 	// Warn if user has explicitly defined backplane URL via env
-	url, ok := getBackplaneEnv(info.BackplaneURLEnvName)
-	if ok {
-		logger.Warn(fmt.Sprintf("Manual URL configuration is deprecated, please unset the environment %s", info.BackplaneURLEnvName))
-		bpConfig.URL = url
-	} else {
-		// Fetch backplane URL from ocm env
-		if bpConfig.URL, err = bpConfig.GetBackplaneURL(); err != nil {
+	url, envURLok := getBackplaneEnv(info.BackplaneURLEnvName)
+	if envURLok {
+		logger.Warn(fmt.Printf("Manual URL configuration is deprecated, please unset the environment %s", info.BackplaneURLEnvName))
+	}
+
+	if ocmConn != nil {
+		// If an OCM connection is provided use this to fetch BP URL
+		// from its v1.environment info
+		if bpConfig.URL, err = bpConfig.GetBackplaneURLWithConn(ocmConn); err != nil {
 			return bpConfig, err
+		}
+	} else {
+		if envURLok {
+			bpConfig.URL = url
+		} else {
+			// Fetch backplane URL from ocm env
+			if bpConfig.URL, err = bpConfig.GetBackplaneURL(); err != nil {
+				return bpConfig, err
+			}
 		}
 	}
 
@@ -165,9 +186,17 @@ func GetBackplaneConfiguration() (bpConfig BackplaneConfiguration, err error) {
 		bpConfig.ProxyURL = &proxyURL
 	}
 
-	if (bpConfig.Govcloud) {
+	// awsProxy is optional
+	awsProxyInConfigFile := viper.GetStringSlice("aws-proxy")
+	awsProxyURL := bpConfig.getFirstWorkingProxyURL(awsProxyInConfigFile)
+	if awsProxyURL != "" {
+		bpConfig.AwsProxy = &awsProxyURL
+	}
+
+	if bpConfig.Govcloud {
 		str := ""
 		bpConfig.ProxyURL = &str
+		bpConfig.AwsProxy = &str
 	}
 
 	bpConfig.SessionDirectory = viper.GetString("session-dir")
@@ -194,7 +223,11 @@ func GetBackplaneConfiguration() (bpConfig BackplaneConfiguration, err error) {
 	bpConfig.JiraBaseURL = viper.GetString(jiraBaseURLKey)
 
 	// JIRA token is optional
-	bpConfig.JiraToken = viper.GetString(JiraTokenViperKey)
+	// JIRA_API_TOKEN env var takes precedence, fallback to config file
+	bpConfig.JiraToken = os.Getenv(info.BackplaneJiraAPITokenEnvName)
+	if bpConfig.JiraToken == "" {
+		bpConfig.JiraToken = viper.GetString(JiraTokenViperKey)
+	}
 
 	// JIRA config for access requests is optional as there is a default value
 	err = viper.UnmarshalKey(JiraConfigForAccessRequestsKey, &bpConfig.JiraConfigForAccessRequests)
@@ -239,6 +272,10 @@ var testProxy = func(ctx context.Context, testURL string, proxyURL url.URL) erro
 	}
 
 	return nil
+}
+
+func (config *BackplaneConfiguration) GetFirstWorkingProxyURL(s []string) string {
+	return config.getFirstWorkingProxyURL(s)
 }
 
 func (config *BackplaneConfiguration) getFirstWorkingProxyURL(s []string) string {
@@ -358,9 +395,8 @@ func GetConfigDirectory() (string, error) {
 }
 
 // GetBackplaneURL returns API URL
-func (config *BackplaneConfiguration) GetBackplaneURL() (string, error) {
-
-	ocmEnv, err := ocm.DefaultOCMInterface.GetOCMEnvironment()
+func (config *BackplaneConfiguration) GetBackplaneURLWithConn(ocmConn *ocmsdk.Connection) (string, error) {
+	ocmEnv, err := ocm.DefaultOCMInterface.GetOCMEnvironmentWithConn(ocmConn)
 	if err != nil {
 		return "", err
 	}
@@ -370,6 +406,29 @@ func (config *BackplaneConfiguration) GetBackplaneURL() (string, error) {
 	}
 	logger.Infof("Backplane URL retrieved via OCM environment: %s", url)
 	return url, nil
+}
+
+// GetBackplaneURL returns API URL
+func (config *BackplaneConfiguration) GetBackplaneURL() (string, error) {
+	ocmEnv, err := ocm.DefaultOCMInterface.GetOCMEnvironment()
+	if err != nil {
+		return "", err
+	}
+	url, ok := ocmEnv.GetBackplaneURL()
+	if !ok {
+		return "", fmt.Errorf("the requested API endpoint is not available for the OCM environment: %v", ocmEnv.Name())
+	}
+	logger.Debugf("Backplane URL retrieved via OCM environment: %s", url)
+	return url, nil
+}
+
+// GetAwsProxy returns the proxy URL to use for AWS operations
+// Priority: 1) AWS proxy from config, 2) regular proxy from config
+func (config *BackplaneConfiguration) GetAwsProxy() *string {
+	if config.AwsProxy != nil {
+		return config.AwsProxy
+	}
+	return config.ProxyURL
 }
 
 // getBackplaneEnv retrieves the value of the environment variable named by the key

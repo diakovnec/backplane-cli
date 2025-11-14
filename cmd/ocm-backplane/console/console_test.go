@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/pflag"
@@ -52,7 +52,7 @@ var _ = Describe("console command", func() {
 		mockEngine = ceMock.NewMockContainerEngine(mockCtrl)
 		ocm.DefaultOCMInterface = mockOcmInterface
 
-		os.Setenv("CONTAINER_ENGINE", PODMAN)
+		_ = os.Setenv("CONTAINER_ENGINE", PODMAN)
 
 		pullSecret = "testpullsecret"
 		clusterID = "cluster123"
@@ -95,7 +95,7 @@ var _ = Describe("console command", func() {
 	})
 
 	AfterEach(func() {
-		os.Setenv("HTTPS_PROXY", "")
+		_ = os.Setenv("HTTPS_PROXY", "")
 		mockCtrl.Finish()
 		utils.RemoveTempKubeConfig()
 	})
@@ -136,27 +136,27 @@ var _ = Describe("console command", func() {
 	Context("when console command executes", func() {
 		It("should read the openbrowser variable from environment variables and it is true", func() {
 			setupConfig()
-			os.Setenv(EnvBrowserDefault, "true")
+			_ = os.Setenv(EnvBrowserDefault, "true")
 			o := newConsoleOptions()
 			err := o.determineOpenBrowser()
-			os.Setenv(EnvBrowserDefault, "")
+			_ = os.Setenv(EnvBrowserDefault, "")
 			Expect(err).To(BeNil())
 			Expect(o.openBrowser).To(BeTrue())
 		})
 
 		It("should read the openbrowser variable from environment variables and it is false", func() {
 			setupConfig()
-			os.Setenv(EnvBrowserDefault, "false")
+			_ = os.Setenv(EnvBrowserDefault, "false")
 			o := newConsoleOptions()
 			err := o.determineOpenBrowser()
-			os.Setenv(EnvBrowserDefault, "")
+			_ = os.Setenv(EnvBrowserDefault, "")
 			Expect(err).To(BeNil())
 			Expect(o.openBrowser).To(BeFalse())
 		})
 
 		It("should read the openbrowser variable from environment variables and we it is undefined", func() {
 			setupConfig()
-			os.Setenv(EnvBrowserDefault, "")
+			_ = os.Setenv(EnvBrowserDefault, "")
 			o := newConsoleOptions()
 			err := o.determineOpenBrowser()
 			Expect(err).To(MatchError(ContainSubstring("unable to parse boolean value from environment variable")))
@@ -316,6 +316,60 @@ var _ = Describe("console command", func() {
 		})
 	})
 
+	Context("For cluster version greater or equal 4.17", func() {
+		clusterInfo, _ := cmv1.NewCluster().
+			CloudProvider(cmv1.NewCloudProvider().ID("aws")).
+			Product(cmv1.NewProduct().ID("dedicated")).
+			AdditionalTrustBundle("REDACTED").
+			Proxy(cmv1.NewProxy().HTTPProxy("http://my.proxy:80").HTTPSProxy("https://my.proxy:443")).
+			OpenshiftVersion("4.17.1").Build()
+
+		It("should assgin a default port for monitoring plugin", func() {
+			setupConfig()
+			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
+			o := newConsoleOptions()
+			err := o.determineNeedMonitorPlugin()
+			Expect(err).To(BeNil())
+			err = o.determineMonitorPluginPort()
+			Expect(err).To(BeNil())
+			Expect(o.monitorPluginPort).To(Equal(DefaultMonitoringPluginPort))
+		})
+
+		It("should add monitoring plugin to console arguments", func() {
+			setupConfig()
+			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
+			o := newConsoleOptions()
+			err := o.determineNeedMonitorPlugin()
+			Expect(err).To(BeNil())
+			plugins, err := o.getPlugins()
+			Expect(err).To(BeNil())
+			Expect(plugins).To(ContainSubstring("monitoring-plugin"))
+		})
+
+		It("should run the monitoring plugin with an environment variable that specifies the default port", func() {
+			setupConfig()
+			ce := mockEngine
+			mockOcmInterface.EXPECT().GetClusterInfoByID(clusterID).Return(clusterInfo, nil).AnyTimes()
+			o := newConsoleOptions()
+			err := o.determineNeedMonitorPlugin()
+			Expect(err).To(BeNil())
+			err = o.determineMonitorPluginPort()
+			Expect(err).To(BeNil())
+
+			ce.EXPECT().RunMonitorPlugin(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Do(
+				func(containerName, consoleContainerName, nginxConf string, pluginArgs []string, envVars []container.EnvVar) {
+					Expect(envVars).To(ContainElement(container.EnvVar{
+						Key:   "PORT",
+						Value: DefaultMonitoringPluginPort,
+					}))
+				}).Return(nil).Times(1)
+			// to make it compatible, here it should still mount the nginx config because some 4.17 version may still need nginx.
+			ce.EXPECT().PutFileToMount(gomock.Any(), gomock.Any()).AnyTimes()
+			err = o.runMonitorPlugin(ce)
+			Expect(err).To(BeNil())
+		})
+	})
+
 	Context("An container is created to run the console, prior to doing that we need to check if container distro is supported", func() {
 		It("In the case we explicitly specify Podman, the code should return support for Podman", func() {
 
@@ -399,7 +453,7 @@ var _ = Describe("console command", func() {
 				OpenshiftVersion("4.13.0").Build()
 
 			// Set Browser opening to false
-			os.Setenv("BACKPLANE_DEFAULT_OPEN_BROWSER", "FALSE")
+			_ = os.Setenv("BACKPLANE_DEFAULT_OPEN_BROWSER", "FALSE")
 			setupConfig()
 
 			// Set some mock varibles,
@@ -420,7 +474,7 @@ var _ = Describe("console command", func() {
 				return mockEngine, nil
 			}
 			mockEngine.EXPECT().RunConsoleContainer(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-			mockEngine.EXPECT().RunMonitorPlugin(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+			mockEngine.EXPECT().RunMonitorPlugin(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 			ce, err := o.getContainerEngineImpl()
 			Expect(err).To(BeNil())
@@ -429,8 +483,131 @@ var _ = Describe("console command", func() {
 			o.runContainers(ce, errs)
 
 			Expect(errs).To(BeEmpty())
-			os.Setenv("BACKPLANE_DEFAULT_OPEN_BROWSER", "")
+			_ = os.Setenv("BACKPLANE_DEFAULT_OPEN_BROWSER", "")
 			setPath(oldpath)
+		})
+	})
+	Context("tests the branding config", func() {
+		Context("tests the version parser", func() {
+			It("should successfully parse a valid version", func() {
+				version, err := parseVersion("4.19.0")
+				Expect(err).To(BeNil())
+				Expect(version.X).To(Equal(4))
+				Expect(version.Y).To(Equal(19))
+				Expect(version.Z).To(Equal(0))
+			})
+			It("should parse a valid patch version", func() {
+				version, err := parseVersion("4.19.0-rc-0.12")
+				Expect(err).To(BeNil())
+				Expect(version.X).To(Equal(4))
+				Expect(version.Y).To(Equal(19))
+				Expect(version.Z).To(Equal(0))
+				Expect(version.Patch).To(Equal("rc-0.12"))
+			})
+			It("should strip any 'v' prefix string", func() {
+				version, err := parseVersion("v4.19.0")
+				Expect(err).To(BeNil())
+				Expect(version.X).To(Equal(4))
+				Expect(version.Y).To(Equal(19))
+				Expect(version.Z).To(Equal(0))
+			})
+			Context("version string error handling", func() {
+				It("should error on an invalid version string", func() {
+					_, err := parseVersion("someinvalidstirng")
+					Expect(err).NotTo(BeNil())
+
+					_, err = parseVersion("4")
+					Expect(err).NotTo(BeNil())
+
+					_, err = parseVersion("4.19")
+					Expect(err).NotTo(BeNil())
+				})
+				It("should error on a x string", func() {
+					_, err := parseVersion("4a.19.0")
+					Expect(err).NotTo(BeNil())
+				})
+				It("should error on a y string", func() {
+					_, err := parseVersion("4.19m.0")
+					Expect(err).NotTo(BeNil())
+				})
+				It("should error on a z string", func() {
+					_, err := parseVersion("4.19.0z")
+					Expect(err).NotTo(BeNil())
+				})
+			})
+		})
+		Context("tests the branding switching logic", func() {
+			It("should get dedicated brand", func() {
+				c, _ := cmv1.NewCluster().
+					Product(cmv1.NewProduct().ID("dedicated")).
+					OpenshiftVersion("4.13.0").Build()
+				bc, err := getBrandingConfig(c)
+				Expect(err).To(BeNil())
+				Expect(bc.Product).To(Equal("dedicated"))
+				Expect(bc.DocsURL).To(ContainSubstring("openshift_dedicated"))
+			})
+			It("should get dedicated brand for >4.14 ROSA clusters", func() {
+				c, _ := cmv1.NewCluster().
+					Product(cmv1.NewProduct().ID("rosa")).
+					OpenshiftVersion("4.13.0").Build()
+				bc, err := getBrandingConfig(c)
+				Expect(err.Error()).To(ContainSubstring("version is less than"))
+				Expect(bc.Product).To(Equal("dedicated"))
+				Expect(bc.DocsURL).To(ContainSubstring("openshift_dedicated"))
+			})
+			It("should get rosa classic", func() {
+				c, _ := cmv1.NewCluster().
+					Product(cmv1.NewProduct().ID("rosa")).
+					Hypershift(cmv1.NewHypershift().Enabled(false)).
+					OpenshiftVersion("4.18.0").Build()
+				bc, err := getBrandingConfig(c)
+				Expect(err).To(BeNil())
+				Expect(bc.Product).To(Equal("rosa"))
+				Expect(bc.DocsURL).To(ContainSubstring("red_hat_openshift_service_on_aws"))
+				Expect(bc.DocsURL).To(ContainSubstring("classic_architecture"))
+			})
+			It("should get rosa hcp", func() {
+				c, _ := cmv1.NewCluster().
+					Product(cmv1.NewProduct().ID("rosa")).
+					Hypershift(cmv1.NewHypershift().Enabled(true)).
+					OpenshiftVersion("4.18.0").Build()
+				bc, err := getBrandingConfig(c)
+				Expect(err).To(BeNil())
+				Expect(bc.Product).To(Equal("rosa"))
+				Expect(bc.DocsURL).To(ContainSubstring("red_hat_openshift_service_on_aws"))
+				Expect(bc.DocsURL).NotTo(ContainSubstring("classic_architecture"))
+			})
+			It("should default to hcp docs when it cannot determine hypershift", func() {
+				c, _ := cmv1.NewCluster().
+					Product(cmv1.NewProduct().ID("rosa")).
+					OpenshiftVersion("4.18.0").Build()
+				bc, err := getBrandingConfig(c)
+				Expect(err).NotTo(BeNil())
+				Expect(bc.DocsURL).To(ContainSubstring("red_hat_openshift_service_on_aws"))
+				Expect(bc.DocsURL).NotTo(ContainSubstring("classic_architecture"))
+			})
+			It("should default to dedicated when it cannot get product", func() {
+				c, _ := cmv1.NewCluster().Build()
+				bc, err := getBrandingConfig(c)
+				Expect(err).NotTo(BeNil())
+				Expect(bc.Product).To(Equal("dedicated"))
+			})
+			It("should default to dedicated when it cannot get version", func() {
+				c, _ := cmv1.NewCluster().
+					Product(cmv1.NewProduct().ID("rosa")).
+					Build()
+				bc, err := getBrandingConfig(c)
+				Expect(err).NotTo(BeNil())
+				Expect(bc.Product).To(Equal("dedicated"))
+			})
+			It("should default to dedicated when it cannot parse version", func() {
+				c, _ := cmv1.NewCluster().
+					Product(cmv1.NewProduct().ID("rosa")).
+					OpenshiftVersion("someinvalidversion").Build()
+				bc, err := getBrandingConfig(c)
+				Expect(err).NotTo(BeNil())
+				Expect(bc.Product).To(Equal("dedicated"))
+			})
 		})
 	})
 })
@@ -454,7 +631,7 @@ func createPathDocker() string {
 func createPath(binary string) string {
 	oldpath := os.Getenv("PATH")
 	setPath(oldpath + ":/tmp/tmp_bin")
-	err := os.MkdirAll("/tmp/tmp_bin", 0777)
+	err := os.MkdirAll("/tmp/tmp_bin", 0777) //nolint:gosec
 	if err != nil {
 		fmt.Printf("Failed to create the directory: %v\n", err)
 	}
@@ -465,7 +642,7 @@ func createPath(binary string) string {
 	if err := os.Rename(dFile.Name(), "/tmp/tmp_bin/"+binary); err != nil {
 		fmt.Printf("Failed to rename the file: %v\n", err)
 	}
-	if err := os.Chmod("/tmp/tmp_bin/"+binary, 0777); err != nil {
+	if err := os.Chmod("/tmp/tmp_bin/"+binary, 0777); err != nil { //nolint:gosec
 		fmt.Printf("Failed to chmod the file: %v\n", err)
 	}
 	return oldpath

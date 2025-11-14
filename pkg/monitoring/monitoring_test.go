@@ -6,7 +6,7 @@ import (
 
 	"net/http/httptest"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	cmv1 "github.com/openshift-online/ocm-sdk-go/clustersmgmt/v1"
@@ -116,7 +116,7 @@ var _ = Describe("Backplane Monitoring Unit test", func() {
 		err := utils.CreateTempKubeConfig(&testKubeCfg)
 		Expect(err).To(BeNil())
 
-		os.Setenv(info.BackplaneURLEnvName, backplaneAPIUri)
+		_ = os.Setenv(info.BackplaneURLEnvName, backplaneAPIUri)
 		ocmEnv, _ = cmv1.NewEnvironment().BackplaneURL("https://dummy.api").Build()
 	})
 

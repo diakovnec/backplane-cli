@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/openshift/backplane-cli/pkg/ocm"
@@ -74,7 +74,7 @@ var _ = Describe("PrintClusterInfo", func() {
 			Expect(err).To(BeNil())
 
 			// Capture the output
-			w.Close()
+			_ = w.Close()
 			os.Stdout = oldStdout
 			_, _ = buf.ReadFrom(r)
 
@@ -97,7 +97,7 @@ var _ = Describe("PrintClusterInfo", func() {
 			Expect(err).To(BeNil())
 
 			// Capture the output
-			w.Close()
+			_ = w.Close()
 			os.Stdout = oldStdout
 			_, _ = buf.ReadFrom(r)
 
@@ -140,7 +140,7 @@ var _ = Describe("PrintClusterInfo", func() {
 			Expect(err).To(BeNil())
 
 			// Capture the output
-			w.Close()
+			_ = w.Close()
 			os.Stdout = oldStdout
 			_, _ = buf.ReadFrom(r)
 
@@ -182,7 +182,7 @@ var _ = Describe("PrintClusterInfo", func() {
 			Expect(err).To(BeNil())
 
 			// Capture the output
-			w.Close()
+			_ = w.Close()
 			os.Stdout = oldStdout
 			_, _ = buf.ReadFrom(r)
 

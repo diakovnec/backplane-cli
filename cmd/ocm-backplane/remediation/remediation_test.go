@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	cmv1 "github.com/openshift-online/ocm-sdk-go/clustersmgmt/v1"
@@ -90,10 +90,10 @@ var _ = Describe("New Remediation command", func() {
 		globalOpts.Service = false
 		globalOpts.BackplaneURL = ""
 		globalOpts.ProxyURL = ""
-		os.Setenv("HTTPS_PROXY", "")
-		os.Setenv("HTTP_PROXY", "")
-		os.Unsetenv("BACKPLANE_CONFIG")
-		os.Remove(bpConfigPath)
+		_ = os.Setenv("HTTPS_PROXY", "")
+		_ = os.Setenv("HTTP_PROXY", "")
+		_ = os.Unsetenv("BACKPLANE_CONFIG")
+		_ = os.Remove(bpConfigPath)
 		mockCtrl.Finish()
 		utils.RemoveTempKubeConfig()
 	})
@@ -128,7 +128,7 @@ var _ = Describe("New Remediation command", func() {
 
 		It("Should use the Proxy URL set in global opts", func() {
 			globalOpts.ProxyURL = "https://squid.example.com"
-			os.Setenv("HTTPS_PROXY", "https://squid.example.com")
+			_ = os.Setenv("HTTPS_PROXY", "https://squid.example.com")
 
 			mockOcmInterface.EXPECT().GetOCMEnvironment().Return(ocmEnv, nil).AnyTimes()
 			mockClientUtil.EXPECT().SetClientProxyURL(globalOpts.ProxyURL).Return(nil)

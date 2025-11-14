@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	cmv1 "github.com/openshift-online/ocm-sdk-go/clustersmgmt/v1"
@@ -53,7 +53,7 @@ var _ = Describe("troubleshoot command", func() {
 		Expect(err).To(BeNil())
 
 		// set backplane config env with temp config file
-		os.Setenv("BACKPLANE_CONFIG", f.Name())
+		_ = os.Setenv("BACKPLANE_CONFIG", f.Name())
 	}
 
 	BeforeEach(func() {
@@ -146,7 +146,7 @@ var _ = Describe("troubleshoot command", func() {
 			CurrentContext: "default/test123/anonymous",
 		}
 		It("should print error if anything wrong in oc config", func() {
-			os.Setenv("KUBECONFIG", "/fake/path")
+			_ = os.Setenv("KUBECONFIG", "/fake/path")
 			o := troubleshootOptions{}
 			err := o.checkOC()
 			Expect(err).To(BeNil())

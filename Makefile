@@ -9,7 +9,7 @@ GO_BUILD_FLAGS :=-tags 'include_gcs include_oss containers_image_openpgp gssapi'
 GO_BUILD_FLAGS_DARWIN :=-tags 'include_gcs include_oss containers_image_openpgp'
 GO_BUILD_FLAGS_LINUX_CROSS :=-tags 'include_gcs include_oss containers_image_openpgp'
 
-GOLANGCI_LINT_VERSION=v1.61.0
+GOLANGCI_LINT_VERSION=v2.5.0
 GORELEASER_VERSION=v1.14.1
 GOVULNCHECK_VERSION=v1.0.1
 
@@ -66,17 +66,20 @@ test-in-container: build-image
 # Installed using instructions from: https://golangci-lint.run/usage/install/#linux-and-windows
 getlint:
 	@mkdir -p $(GOPATH)/bin
-	@ls $(GOPATH)/bin/golangci-lint 1>/dev/null || (echo "Installing golangci-lint..." && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin $(GOLANGCI_LINT_VERSION))
-
+	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin $(GOLANGCI_LINT_VERSION)
 .PHONY: lint
 lint: getlint
 	$(GOPATH)/bin/golangci-lint run --timeout 5m
 
 ensure-goreleaser:
-	@ls $(GOPATH)/bin/goreleaser 1>/dev/null || go install github.com/goreleaser/goreleaser@${GORELEASER_VERSION}
+	@command -v goreleaser >/dev/null 2>&1 || go install github.com/goreleaser/goreleaser@${GORELEASER_VERSION}
 
 release: ensure-goreleaser
 	goreleaser release --rm-dist
+
+release-with-note: ensure-goreleaser
+	goreleaser release --rm-dist --release-notes="$(NOTE)"
 
 test:
 	go test -v $(TESTOPTS) ./...
@@ -125,7 +128,7 @@ mock-gen:
 
 .PHONY: build-image
 build-image:
-	$(CONTAINER_ENGINE) build --pull --platform linux/amd64 --build-arg=GOLANGCI_LINT_VERSION -t backplane-cli-builder -f ./make.Dockerfile .
+	$(CONTAINER_ENGINE) build --pull --platform linux/amd64 --build-arg GOLANGCI_LINT_VERSION=$(GOLANGCI_LINT_VERSION) -t backplane-cli-builder -f ./make.Dockerfile .
 
 .PHONY: lint-in-container
 lint-in-container: build-image
@@ -182,4 +185,3 @@ help:
 	@echo "  make clean && make install  # Fresh install"
 	@echo "  GOOS=darwin make build      # Build for macOS"
 	@echo
-	

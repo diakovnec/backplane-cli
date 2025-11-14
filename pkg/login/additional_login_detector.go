@@ -38,6 +38,9 @@ var backplaneUserNamespacesToCheck []string = []string{
 	SREP,
 }
 
+// FindOtherSessions discovers other active backplane sessions in the cluster.
+// It examines service accounts across different backplane user namespaces to identify concurrent sessions.
+// Returns a map of role names to session counts, excluding the current user's session.
 func FindOtherSessions(clientset kubernetes.Interface, config *rest.Config, user string) (map[string]int, error) {
 	sessions := map[string]int{}
 
@@ -104,13 +107,13 @@ func FindOtherSessions(clientset kubernetes.Interface, config *rest.Config, user
 
 func PrintSessions(w io.Writer, sessions map[string]int) {
 	if len(sessions) == 0 {
-		fmt.Fprintf(w, "There are no other backplane users logged in.\n")
+		_, _ = fmt.Fprintf(w, "There are no other backplane users logged in.\n")
 		return
 	}
 
-	fmt.Fprintf(w, "Checking for other backplane sessions:\n")
+	_, _ = fmt.Fprintf(w, "Checking for other backplane sessions:\n")
 	for sessionRole, sessionCount := range sessions {
-		fmt.Fprintf(w, "  - There are %d other users logged in under the %s role.\n", sessionCount, sessionRole)
+		_, _ = fmt.Fprintf(w, "  - There are %d other users logged in under the %s role.\n", sessionCount, sessionRole)
 	}
 }
 

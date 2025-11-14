@@ -21,19 +21,21 @@ func RenderTabbedTable(headers []string, data [][]string) {
 	writer := tabwriter.NewWriter(os.Stdout, 0, 0, columnPadding, ' ', tabwriter.TabIndent)
 
 	// print the headers
-	fmt.Fprintf(writer, "%s", strings.Join(headers, "\t"))
-	fmt.Fprintln(writer)
+	_, _ = fmt.Fprintf(writer, "%s", strings.Join(headers, "\t"))
+	_, _ = fmt.Fprintln(writer)
 
 	// print the rows
 	for _, row := range data {
-		fmt.Fprintf(writer, "%s", strings.Join(truncateColumns(row, maxColumnWidth), "\t"))
-		fmt.Fprintln(writer)
+		_, _ = fmt.Fprintf(writer, "%s", strings.Join(truncateColumns(row, maxColumnWidth), "\t"))
+		_, _ = fmt.Fprintln(writer)
 	}
 
-	writer.Flush()
+	_ = writer.Flush()
 }
 
-// this method helps calculate a uniformly distributed column width for all columns after the first column
+// calculateOptimalWidthsForColumns calculates optimal column width for table rendering.
+// It reserves space for the first column and distributes remaining terminal width among other columns.
+// Returns a fallback width of 200 if terminal width cannot be determined.
 func calculateOptimalWidthsForColumns(data [][]string, columnPadding int) int {
 	// detect terminal width
 	terminalWidth, _, err := term.GetSize(0)
@@ -54,6 +56,8 @@ func calculateOptimalWidthsForColumns(data [][]string, columnPadding int) int {
 	return maxColumnWidth
 }
 
+// truncateColumns truncates columns (except the first one) to fit within the specified width.
+// If content exceeds maxColumnWidth or contains newlines, it's truncated with "..." suffix.
 func truncateColumns(row []string, maxColumnWidth int) []string {
 	processedRow := []string{}
 
@@ -78,6 +82,8 @@ func truncateColumns(row []string, maxColumnWidth int) []string {
 	return processedRow
 }
 
+// RenderTable renders data in a formatted table using the tablewriter library.
+// It displays the headers and data with proper alignment and formatting.
 func RenderTable(headers []string, data [][]string) {
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader(headers)

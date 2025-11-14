@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 	ocmsdk "github.com/openshift-online/ocm-sdk-go"
 	cmv1 "github.com/openshift-online/ocm-sdk-go/clustersmgmt/v1"
 	BackplaneApi "github.com/openshift/backplane-api/pkg/client"
@@ -44,6 +45,10 @@ var GetCallerIdentity = func(client *sts.Client) error {
 	_, err := client.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
 	return err
 }
+
+// CheckEgressIP checks the egress IP of the client
+// This is a wrapper around checkEgressIPImpl to allow for easy mocking
+var CheckEgressIP = checkEgressIPImpl
 
 // QueryConfig Wrapper for the configuration needed for cloud requests
 type QueryConfig struct {
@@ -108,7 +113,7 @@ func (cfg *QueryConfig) GetCloudConsole() (*ConsoleResponse, error) {
 func (cfg *QueryConfig) getCloudConsoleFromPublicAPI(ocmToken string) (*ConsoleResponse, error) {
 	logger.Debugln("Getting Cloud Console")
 
-	client, err := backplaneapi.DefaultClientUtils.GetBackplaneClient(cfg.BackplaneConfiguration.URL, ocmToken, cfg.BackplaneConfiguration.ProxyURL)
+	client, err := backplaneapi.DefaultClientUtils.GetBackplaneClient(cfg.URL, ocmToken, cfg.ProxyURL)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +173,7 @@ func (cfg *QueryConfig) GetCloudCredentials() (bpCredentials.Response, error) {
 }
 
 func (cfg *QueryConfig) getCloudCredentialsFromBackplaneAPI(ocmToken string) (bpCredentials.Response, error) {
-	client, err := backplaneapi.DefaultClientUtils.GetBackplaneClient(cfg.BackplaneConfiguration.URL, ocmToken, cfg.BackplaneConfiguration.ProxyURL)
+	client, err := backplaneapi.DefaultClientUtils.GetBackplaneClient(cfg.URL, ocmToken, cfg.ProxyURL)
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +216,7 @@ func (cfg *QueryConfig) getCloudCredentialsFromBackplaneAPI(ocmToken string) (bp
 type assumeChainResponse struct {
 	AssumptionSequence      []namedRoleArn `json:"assumptionSequence"`
 	CustomerRoleSessionName string         `json:"customerRoleSessionName"`
+	SessionPolicyArn        string         `json:"sessionPolicyArn"` // SessionPolicyArn is the ARN of the session policy
 }
 
 type namedRoleArn struct {
@@ -237,15 +243,15 @@ func (cfg *QueryConfig) getIsolatedCredentials(ocmToken string) (aws.Credentials
 		return aws.Credentials{}, fmt.Errorf("unable to extract email from given token: %w", err)
 	}
 
-	if cfg.BackplaneConfiguration.AssumeInitialArn == "" {
+	if cfg.AssumeInitialArn == "" {
 		// If not provided as an override, attempt to automatically set this based on OCM url
 		switch cfg.OcmConnection.URL() {
 		case productionOCMUrl:
-			cfg.BackplaneConfiguration.AssumeInitialArn = productionAssumeInitialArn
+			cfg.AssumeInitialArn = productionAssumeInitialArn
 		case stagingOCMUrl:
-			cfg.BackplaneConfiguration.AssumeInitialArn = stagingAssumeInitialArn
+			cfg.AssumeInitialArn = stagingAssumeInitialArn
 		case integrationOCMUrl:
-			cfg.BackplaneConfiguration.AssumeInitialArn = integrationAssumeInitialArn
+			cfg.AssumeInitialArn = integrationAssumeInitialArn
 		default:
 			logger.Infof("failed to automatically set assume-initial-arn based on OCM url: %s", cfg.OcmConnection.URL())
 			return aws.Credentials{}, errors.New("backplane config is missing required `assume-initial-arn` property")
@@ -257,37 +263,61 @@ func (cfg *QueryConfig) getIsolatedCredentials(ocmToken string) (aws.Credentials
 			stagingAssumeInitialArn,
 			integrationAssumeInitialArn,
 		},
-		cfg.BackplaneConfiguration.AssumeInitialArn,
+		cfg.AssumeInitialArn,
 	) {
-		logger.Warnf("assume-initial-arn in backplane config is not set to a valid payer ARN, using: %s", cfg.BackplaneConfiguration.AssumeInitialArn)
+		logger.Warnf("assume-initial-arn in backplane config is not set to a valid payer ARN, using: %s", cfg.AssumeInitialArn)
 		return aws.Credentials{}, fmt.Errorf("invalid assume-initial-arn: %s, must be one of: prod: %s, stage: %s, int: %s",
-			cfg.BackplaneConfiguration.AssumeInitialArn,
+			cfg.AssumeInitialArn,
 			productionAssumeInitialArn,
 			stagingAssumeInitialArn,
 			integrationAssumeInitialArn,
 		)
 
 	}
-	initialClient, err := StsClient(cfg.BackplaneConfiguration.ProxyURL)
+	// Use AWS-specific proxy for initial STS client, fallback to regular proxy
+	// Priority: 1) AWS proxy from config; 2) regular proxy from local backplane config
+	stsProxyURL := cfg.GetAwsProxy()
+	initialClient, err := StsClient(stsProxyURL)
 	if err != nil {
 		return aws.Credentials{}, fmt.Errorf("failed to create sts client: %w", err)
 	}
 
-	seedCredentials, err := AssumeRoleWithJWT(ocmToken, cfg.BackplaneConfiguration.AssumeInitialArn, initialClient)
+	seedCredentials, err := AssumeRoleWithJWT(ocmToken, cfg.AssumeInitialArn, initialClient)
 	if err != nil {
 		return aws.Credentials{}, fmt.Errorf("failed to assume role using JWT: %w", err)
 	}
 	// Verify Sts connection with the seed credentials
-	stsClient := sts.NewFromConfig(aws.Config{
-		Region:      "us-east-1",
-		Credentials: NewStaticCredentialsProvider(seedCredentials.AccessKeyID, seedCredentials.SecretAccessKey, seedCredentials.SessionToken),
-	})
+	// Use AWS-specific proxy for STS operations
+	awsProxyURL := cfg.GetAwsProxy()
+
+	var stsClientConfig aws.Config
+	if awsProxyURL != nil {
+		stsClientConfig = aws.Config{
+			Region:      "us-east-1",
+			Credentials: NewStaticCredentialsProvider(seedCredentials.AccessKeyID, seedCredentials.SecretAccessKey, seedCredentials.SessionToken),
+			HTTPClient: &http.Client{
+				Transport: &http.Transport{
+					Proxy: func(*http.Request) (*url.URL, error) {
+						return url.Parse(*awsProxyURL)
+					},
+				},
+			},
+		}
+		logger.Debugf("Using AWS proxy for GetCallerIdentity: %s", *awsProxyURL)
+	} else {
+		stsClientConfig = aws.Config{
+			Region:      "us-east-1",
+			Credentials: NewStaticCredentialsProvider(seedCredentials.AccessKeyID, seedCredentials.SecretAccessKey, seedCredentials.SessionToken),
+		}
+	}
+
+	stsClient := sts.NewFromConfig(stsClientConfig)
 	err = GetCallerIdentity(stsClient)
 	if err != nil {
 		return aws.Credentials{}, fmt.Errorf("unable to connect to AWS STS endpoint (GetCallerIdentity failed): %w", err)
 	}
 
-	backplaneClient, err := backplaneapi.DefaultClientUtils.GetBackplaneClient(cfg.BackplaneConfiguration.URL, ocmToken, cfg.BackplaneConfiguration.ProxyURL)
+	backplaneClient, err := backplaneapi.DefaultClientUtils.GetBackplaneClient(cfg.URL, ocmToken, cfg.ProxyURL)
 	if err != nil {
 		return aws.Credentials{}, fmt.Errorf("failed to create backplane client with access token: %w", err)
 	}
@@ -297,7 +327,21 @@ func (cfg *QueryConfig) getIsolatedCredentials(ocmToken string) (aws.Credentials
 		return aws.Credentials{}, fmt.Errorf("failed to fetch arn sequence: %w", err)
 	}
 	if response.StatusCode != http.StatusOK {
-		return aws.Credentials{}, fmt.Errorf("failed to fetch arn sequence: %w", utils.TryPrintAPIError(response, false))
+		// Read the response body to include in error message for better debugging
+		bodyBytes, readErr := io.ReadAll(response.Body)
+		bodyStr := ""
+		if readErr == nil {
+			bodyStr = strings.TrimSpace(string(bodyBytes))
+		}
+		// Restore the body for TryPrintAPIError to parse it
+		if readErr == nil {
+			response.Body = io.NopCloser(strings.NewReader(bodyStr))
+		}
+		apiErr := utils.TryPrintAPIError(response, false)
+		if apiErr != nil {
+			return aws.Credentials{}, fmt.Errorf("failed to fetch arn sequence: %w (response body: %s)", apiErr, bodyStr)
+		}
+		return aws.Credentials{}, fmt.Errorf("failed to fetch arn sequence: status %s (response body: %s)", response.Status, bodyStr)
 	}
 
 	bytes, err := io.ReadAll(response.Body)
@@ -311,6 +355,11 @@ func (cfg *QueryConfig) getIsolatedCredentials(ocmToken string) (aws.Credentials
 		return aws.Credentials{}, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
+	inlinePolicy, err := verifyTrustedIPAndGetPolicy(cfg)
+	if err != nil {
+		return aws.Credentials{}, err
+	}
+
 	assumeRoleArnSessionSequence := make([]awsutil.RoleArnSession, 0, len(roleChainResponse.AssumptionSequence))
 	for _, namedRoleArnEntry := range roleChainResponse.AssumptionSequence {
 		roleArnSession := awsutil.RoleArnSession{RoleArn: namedRoleArnEntry.Arn}
@@ -319,6 +368,28 @@ func (cfg *QueryConfig) getIsolatedCredentials(ocmToken string) (aws.Credentials
 		} else {
 			roleArnSession.RoleSessionName = email
 		}
+		// Default to no policy ARNs
+		roleArnSession.PolicyARNs = []types.PolicyDescriptorType{}
+		if namedRoleArnEntry.Name == CustomerRoleArnName {
+			roleArnSession.IsCustomerRole = true
+
+			// Add the session policy ARN for selected roles
+			if roleChainResponse.SessionPolicyArn != "" {
+				logger.Debugf("Adding session policy ARN for role %s: %s", namedRoleArnEntry.Name, roleChainResponse.SessionPolicyArn)
+				roleArnSession.PolicyARNs = []types.PolicyDescriptorType{
+					{
+						Arn: aws.String(roleChainResponse.SessionPolicyArn),
+					},
+				}
+			} else {
+				roleArnSession.Policy = &inlinePolicy
+			}
+
+		} else {
+			roleArnSession.IsCustomerRole = false
+		}
+		roleArnSession.Name = namedRoleArnEntry.Name
+
 		assumeRoleArnSessionSequence = append(assumeRoleArnSessionSequence, roleArnSession)
 	}
 
@@ -327,45 +398,14 @@ func (cfg *QueryConfig) getIsolatedCredentials(ocmToken string) (aws.Credentials
 		Credentials: NewStaticCredentialsProvider(seedCredentials.AccessKeyID, seedCredentials.SecretAccessKey, seedCredentials.SessionToken),
 	})
 
-	var proxyURL *url.URL
-
-	if cfg.BackplaneConfiguration.ProxyURL != nil {
-		proxyURL, err = url.Parse(*cfg.BackplaneConfiguration.ProxyURL)
-		if err != nil {
-			return aws.Credentials{}, fmt.Errorf("failed to parse proxy URL: %w", err)
-		}
-	}
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		},
-	}
-	clientIP, err := checkEgressIP(httpClient, "https://checkip.amazonaws.com/")
-	if err != nil {
-		return aws.Credentials{}, fmt.Errorf("failed to determine client IP: %w", err)
-	}
-
-	trustedRange, err := getTrustedIPList(cfg.OcmConnection)
-	if err != nil {
-		return aws.Credentials{}, err
-	}
-
-	err = verifyIPTrusted(clientIP, trustedRange)
-	if err != nil {
-		return aws.Credentials{}, err
-	}
-
-	inlinePolicy, err := getTrustedIPInlinePolicy(trustedRange)
-	if err != nil {
-		return aws.Credentials{}, fmt.Errorf("failed to build inline policy: %w", err)
-	}
-
+	// Use AWS-specific proxy for role sequence, fallback to regular proxy
+	// Priority: 1) AWS proxy from config, 2) regular proxy from config
+	roleSequenceProxyURL := cfg.GetAwsProxy()
 	targetCredentials, err := AssumeRoleSequence(
 		seedClient,
 		assumeRoleArnSessionSequence,
-		cfg.BackplaneConfiguration.ProxyURL,
+		roleSequenceProxyURL, // Use AWS proxy if configured, otherwise regular proxy
 		awsutil.DefaultSTSClientProviderFunc,
-		&inlinePolicy,
 	)
 	if err != nil {
 		return aws.Credentials{}, fmt.Errorf("failed to assume role sequence: %w", err)
@@ -373,12 +413,61 @@ func (cfg *QueryConfig) getIsolatedCredentials(ocmToken string) (aws.Credentials
 	return targetCredentials, nil
 }
 
-func checkEgressIP(client *http.Client, url string) (net.IP, error) {
+// verifyTrustedIPAndGetPolicy verifies that the client IP is in the trusted IP range
+// and returns the inline policy for the trusted IPs
+func verifyTrustedIPAndGetPolicy(cfg *QueryConfig) (awsutil.PolicyDocument, error) {
+	// Use AWS-specific proxy for egress IP check, fallback to regular proxy
+	// Priority: 1) AWS proxy from config, 2) regular proxy from config
+	var egressProxyURL *url.URL
+	if proxyURLString := cfg.GetAwsProxy(); proxyURLString != nil {
+		var err error
+		egressProxyURL, err = url.Parse(*proxyURLString)
+		if err != nil {
+			return awsutil.PolicyDocument{}, fmt.Errorf("failed to parse proxy for checkEgressIP: %w", err)
+		}
+		logger.Debugf("Using proxy for egress IP check: %s", *proxyURLString)
+	}
+
+	var httpClient *http.Client
+	if egressProxyURL != nil {
+		httpClient = &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyURL(egressProxyURL),
+			},
+		}
+	} else {
+		httpClient = &http.Client{}
+	}
+	clientIP, err := CheckEgressIP(httpClient, "https://checkip.amazonaws.com/")
+	if err != nil {
+		return awsutil.PolicyDocument{}, fmt.Errorf("failed to determine client IP: %w", err)
+	}
+
+	trustedRange, err := getTrustedIPList(cfg.OcmConnection)
+	if err != nil {
+		return awsutil.PolicyDocument{}, err
+	}
+
+	err = verifyIPTrusted(clientIP, trustedRange)
+	if err != nil {
+		return awsutil.PolicyDocument{}, err
+	}
+
+	inlinePolicy, err := getTrustedIPInlinePolicy(trustedRange)
+	if err != nil {
+		return awsutil.PolicyDocument{}, fmt.Errorf("failed to build inline policy: %w", err)
+	}
+
+	return inlinePolicy, nil
+}
+
+// checkEgressIPImpl checks the egress IP of the client
+func checkEgressIPImpl(client *http.Client, url string) (net.IP, error) {
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch IP: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -395,11 +484,11 @@ func checkEgressIP(client *http.Client, url string) (net.IP, error) {
 
 func verifyIPTrusted(ip net.IP, trustedIPs awsutil.IPAddress) error {
 	for _, trustedIP := range trustedIPs.SourceIp {
-		parsedIP, _, err := net.ParseCIDR(trustedIP)
+		_, network, err := net.ParseCIDR(trustedIP)
 		if err != nil {
-			return fmt.Errorf("failed to parse the given trusted IP: %w", err)
+			return fmt.Errorf("failed to parse trusted IP CIDR %s: %w", trustedIP, err)
 		}
-		if parsedIP.Equal(ip) {
+		if network.Contains(ip) {
 			return nil
 		}
 	}
@@ -471,7 +560,7 @@ func isIsolatedBackplaneAccess(cluster *cmv1.Cluster, ocmConnection *ocmsdk.Conn
 	if strings.HasSuffix(baseDomain, "devshiftusgov.com") || strings.HasSuffix(baseDomain, "openshiftusgov.com") {
 		return false, nil
 	}
-	
+
 	if cluster.Hypershift().Enabled() {
 		return true, nil
 	}

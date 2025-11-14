@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/cobra"
@@ -84,7 +84,7 @@ var _ = Describe("Backplane Session Unit test", func() {
 		}
 		fakeResp.Header.Add("Content-Type", "json")
 
-		os.Setenv(info.BackplaneURLEnvName, backplaneAPIUri)
+		_ = os.Setenv(info.BackplaneURLEnvName, backplaneAPIUri)
 		ocmEnv, _ = cmv1.NewEnvironment().BackplaneURL("https://dummy.api").Build()
 	})
 

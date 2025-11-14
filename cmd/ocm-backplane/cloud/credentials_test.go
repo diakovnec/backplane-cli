@@ -10,7 +10,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -135,11 +135,11 @@ var _ = Describe("Cloud console command", func() {
 
 		// Disabled log output
 		log.SetOutput(io.Discard)
-		os.Setenv(info.BackplaneURLEnvName, proxyURI)
+		_ = os.Setenv(info.BackplaneURLEnvName, proxyURI)
 	})
 
 	AfterEach(func() {
-		os.Setenv(info.BackplaneURLEnvName, "")
+		_ = os.Setenv(info.BackplaneURLEnvName, "")
 		mockCtrl.Finish()
 	})
 
