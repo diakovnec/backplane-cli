@@ -99,7 +99,7 @@ func (cfg *QueryConfig) GetCloudConsole() (*ConsoleResponse, error) {
 			return nil, fmt.Errorf("failed to get signin token: %w", err)
 		}
 
-		signinFederationURL, err := awsutil.GetConsoleURL(resp.SigninToken, cfg.Cluster.Region().ID())
+		signinFederationURL, err := awsutil.GetConsoleURL(resp.SigninToken, cfg.Cluster.Region().ID(), cfg.SessionDurationMinutes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate console url: %w", err)
 		}
@@ -518,6 +518,7 @@ func getTrustedIPList(connection *ocmsdk.Connection) (awsutil.IPAddress, error) 
 
 			// Proxy IPs
 			if strings.HasPrefix(ip.ID(), "209.") ||
+				strings.HasPrefix(ip.ID(), "182.") ||
 				strings.HasPrefix(ip.ID(), "66.") ||
 				strings.HasPrefix(ip.ID(), "91.") {
 				sourceIPList = append(sourceIPList, fmt.Sprintf("%s/32", ip.ID()))
